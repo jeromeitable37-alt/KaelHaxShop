@@ -1728,7 +1728,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
 .chat-shell{border:1px solid var(--line);background:var(--surface);border-radius:18px;overflow:hidden;max-width:860px}.chat-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 16px;border-bottom:1px solid var(--line);background:#101720}.chat-header strong{display:block;font-size:15px}.chat-header span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.chat-status{display:inline-flex!important;border:1px solid #275f44;border-radius:999px;padding:5px 8px;color:var(--green)!important;font-size:9px!important;font-weight:900}.chat-thread{padding:16px;min-height:340px;max-height:540px;overflow:auto;background:#0b1017}.chat-row{display:flex;margin:8px 0}.chat-row.mine{justify-content:flex-end}.chat-row.theirs{justify-content:flex-start}.chat-bubble{max-width:min(78%,620px);border:1px solid #293341;background:#151d27;border-radius:15px;padding:10px 11px}.chat-row.mine .chat-bubble{background:#1a293a;border-color:#31506d}.chat-author{font-size:10px;color:var(--blue);font-weight:900;margin-bottom:5px}.chat-text{font-size:13px;line-height:1.5;color:#e4eaf1;word-break:break-word}.chat-inline-link{color:#89b8ff;text-decoration:underline}.chat-time{font-size:9px;color:#788496;margin-top:7px}.chat-link-btn{display:inline-flex;margin-top:8px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:9px;padding:7px 9px;font-size:10px;font-weight:900}.chat-empty{text-align:center;padding:70px 18px;color:#7f8b9a;font-size:12px;line-height:1.6}.chat-compose{padding:13px;border-top:1px solid var(--line);background:#101720}.chat-compose textarea{width:100%;min-height:90px;resize:vertical;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-compose-row{display:grid;grid-template-columns:1fr auto;gap:9px;margin-top:9px}.chat-compose-row input{width:100%;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-send{width:auto;min-width:150px;margin-top:0}.chat-admin-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:14px}.chat-inbox-list{display:grid;gap:8px;max-height:620px;overflow:auto}.chat-inbox-item{display:block;border:1px solid var(--line);background:#101720;border-radius:12px;padding:11px;color:inherit}.chat-inbox-item:hover,.chat-inbox-item.active{border-color:#31567f;background:#182332}.chat-inbox-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.chat-inbox-top strong{font-size:12px}.chat-inbox-preview{margin-top:5px;color:#b0bac7;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-inbox-time{margin-top:5px;color:#758091;font-size:9px}.chat-unread{display:inline-flex;min-width:20px;height:20px;align-items:center;justify-content:center;border-radius:999px;background:#70a6ff;color:#07101a;font-size:9px;font-weight:900}.chat-admin-thread{min-width:0}.admin-thread-header{margin:-18px -18px 0}.admin-thread-scroll{min-height:360px;max-height:560px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}.chat-admin-thread .chat-header{border-radius:16px 16px 0 0}
 
-.pwa-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 18px;padding:12px 13px;border:1px solid var(--line);background:#101720;border-radius:14px}.pwa-tools-left{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwa-tools button{border:1px solid var(--line);background:#18212b;color:#e7edf4;border-radius:10px;padding:9px 11px;font-size:11px;font-weight:900}.pwa-tools button.primary-tool{background:#70a6ff;color:#07101a;border-color:#70a6ff}.pwa-tools button:disabled{opacity:.55;cursor:not-allowed}.pwa-status{font-size:10px;color:#8e9aaa}.order-notification-toast{position:fixed;right:18px;bottom:18px;z-index:120;width:min(390px,calc(100vw - 28px));padding:14px 15px;border:1px solid #31567f;background:#121b27;color:#eef4fb;border-radius:15px;box-shadow:0 18px 55px rgba(0,0,0,.38);display:none}.order-notification-toast.show{display:block;animation:toastIn .22s ease-out}.order-notification-toast strong{display:block;font-size:13px}.order-notification-toast span{display:block;color:#aeb8c6;font-size:11px;margin-top:4px;line-height:1.45}.order-notification-toast a{display:inline-block;margin-top:9px;color:#91bcff;font-size:10px;font-weight:900}.pwa-install-note{font-size:10px;color:#778394;line-height:1.45}@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.pwa-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 18px;padding:12px 13px;border:1px solid var(--line);background:#101720;border-radius:14px}.pwa-tools-left{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwa-tools button{border:1px solid var(--line);background:#18212b;color:#e7edf4;border-radius:10px;padding:9px 11px;font-size:11px;font-weight:900}.pwa-tools button.primary-tool{background:#70a6ff;color:#07101a;border-color:#70a6ff}.pwa-tools button:disabled{opacity:.55;cursor:not-allowed}.pwa-status{font-size:10px;color:#8e9aaa}.order-notification-toast{position:fixed;right:18px;bottom:18px;z-index:120;width:min(400px,calc(100vw - 28px));padding:0;overflow:hidden;border:1px solid #31567f;background:linear-gradient(135deg,#152131,#0f171f);color:#eef4fb;border-radius:18px;box-shadow:0 22px 70px rgba(0,0,0,.45);display:none;transform:translateY(14px) scale(.98);opacity:0}.order-notification-toast.show{display:block;animation:toastPop .28s cubic-bezier(.22,.8,.2,1) forwards}.order-notification-toast::before{content:"";display:block;height:3px;background:linear-gradient(90deg,#70a6ff,#51dc92)}.order-notification-inner{display:grid;grid-template-columns:42px 1fr auto;gap:11px;align-items:start;padding:13px}.order-notification-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:#1b2a3a;border:1px solid #33475e;font-size:20px;box-shadow:inset 0 0 18px rgba(114,166,255,.08)}.order-notification-copy strong{display:block;font-size:13px;letter-spacing:.01em}.order-notification-copy span{display:block;color:#aeb8c6;font-size:11px;margin-top:4px;line-height:1.45}.order-notification-copy a{display:inline-flex;margin-top:9px;color:#9bc3ff;font-size:10px;font-weight:900}.order-notification-close{width:28px;height:28px;border-radius:9px;border:1px solid #2e3c4c;background:#141d27;color:#aeb8c6;cursor:pointer;font-size:17px;line-height:1}.order-notification-close:hover{color:#fff;background:#1b2734}.order-notification-toast.pulse .order-notification-icon{animation:notifyPulse .8s ease-in-out infinite}.pwa-install-note{font-size:10px;color:#778394;line-height:1.45}@keyframes toastPop{0%{opacity:0;transform:translateY(14px) scale(.98)}100%{opacity:1;transform:translateY(0) scale(1)}}@keyframes notifyPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}@media(max-width:700px){.order-notification-toast{right:10px;bottom:12px;width:calc(100vw - 20px)}}
 .modal-backdrop{position:fixed;z-index:90;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;padding:0}.modal-backdrop.open{display:flex}.modal{width:min(650px,100%);max-height:94vh;overflow:auto;background:#0d131b;border:1px solid var(--line);border-radius:21px 21px 0 0;padding:18px 15px 25px}.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.modal-head h2{margin:4px 0;font-size:24px}.modal-muted{color:var(--muted);margin:0;font-size:13px}.close{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);color:#cbd4df;border-radius:10px;font-size:24px}
 @media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}.chat-admin-layout{grid-template-columns:1fr}.chat-inbox-list{max-height:260px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}}
 @media(max-width:700px){.chat-shell{border-radius:16px}.chat-thread{min-height:300px;padding:12px}.chat-bubble{max-width:88%}.chat-compose-row{grid-template-columns:1fr}.chat-send{width:100%;min-width:0}.chat-admin-thread .chat-header{margin:-16px -15px 0}.chat-admin-thread .chat-thread{margin:0 -15px}.chat-admin-thread .chat-compose{margin:0 -15px -16px}.site-header{height:80px}.header-inner{padding:0 16px}.brand-logo{width:40px;height:40px}.brand-title{font-size:16px}.drawer{top:80px}.menu-backdrop{inset:80px 0 0}main{padding:23px 14px 49px}.content-head{margin-bottom:18px}.content-head h1{font-size:34px}.content-head p{font-size:14px}.shop-grid{grid-template-columns:1fr;gap:14px}.product-card{border-radius:19px}.product-info{padding:16px 14px 15px}.product-name{font-size:21px}.product-price{font-size:20px}.view-btn{padding:12px;font-size:17px}.product-meta h1{font-size:30px}.product-layout{gap:8px}.product-art{margin-top:17px;border-radius:15px}.price-panel{padding:16px;border-radius:17px}.price-panel h2{font-size:24px}.price-item{padding:12px 11px}.price-right{gap:8px}.amount{font-size:14px}.buy{padding:9px 10px}.details-panel{padding:16px}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.auth-shell{padding:18px 13px;min-height:calc(100vh - 80px);align-items:center}.auth-card{padding:19px 15px;border-radius:18px}.auth-card h1{font-size:26px}.admin-panel{grid-template-columns:1fr}.drawer-inner{padding:18px 15px}}
@@ -1883,10 +1883,10 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
     <div class="pwa-tools">
       <div class="pwa-tools-left">
-        <button type="button" id="enableAdminNotifications" class="primary-tool">🔔 Enable Order Notifications</button>
+        <button type="button" id="enableAdminNotifications" class="primary-tool">🔔 Enable Sound & Vibration</button>
         <button type="button" id="installPwaButton" style="display:none">📲 Install App</button>
       </div>
-      <span id="adminNotificationStatus" class="pwa-status">Checking notification status…</span>
+      <span id="adminNotificationStatus" class="pwa-status">Tap Enable Sound & Vibration once to unlock order alerts.</span>
     </div>
 
     <?php if ($tab === 'dashboard'): ?>
@@ -2153,36 +2153,114 @@ function setNotificationStatus(message) {
   if (el) el.textContent = message;
 }
 
-async function enableAdminNotifications() {
+/*
+ * In-app order alert feedback.
+ * This intentionally does NOT call the browser Notification API, so active
+ * admins get the site's own bubble instead of a Google/Chrome notification.
+ */
+let adminAudioContext = null;
+let adminAudioUnlocked = false;
+
+function unlockAdminAlertFeedback() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return false;
+
+    if (!adminAudioContext) {
+      adminAudioContext = new AudioCtx();
+    }
+
+    if (adminAudioContext.state === 'suspended') {
+      adminAudioContext.resume().catch(() => {});
+    }
+
+    const now = adminAudioContext.currentTime;
+    const gain = adminAudioContext.createGain();
+    const oscillator = adminAudioContext.createOscillator();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, now);
+    oscillator.frequency.exponentialRampToValueAtTime(660, now + 0.12);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.075, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+    oscillator.connect(gain);
+    gain.connect(adminAudioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.17);
+
+    adminAudioUnlocked = true;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function playAdminOrderAlert() {
+  try {
+    if (!adminAudioContext) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      adminAudioContext = new AudioCtx();
+    }
+
+    if (adminAudioContext.state === 'suspended') {
+      adminAudioContext.resume().catch(() => {});
+    }
+
+    const now = adminAudioContext.currentTime;
+    const gain = adminAudioContext.createGain();
+    const oscillator = adminAudioContext.createOscillator();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, now);
+    oscillator.frequency.setValueAtTime(988, now + 0.11);
+    oscillator.frequency.setValueAtTime(1175, now + 0.22);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+
+    oscillator.connect(gain);
+    gain.connect(adminAudioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.36);
+  } catch (_) {}
+
+  try {
+    if ('vibrate' in navigator) {
+      navigator.vibrate([120, 70, 120, 70, 180]);
+    }
+  } catch (_) {}
+}
+
+function enableAdminNotifications() {
   const button = document.getElementById('enableAdminNotifications');
   if (!button) return;
 
-  if (!('Notification' in window)) {
-    setNotificationStatus('Browser notifications are not supported here.');
-    button.disabled = true;
-    return;
-  }
+  const audioReady = unlockAdminAlertFeedback();
 
   try {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      setNotificationStatus('Notifications enabled. New orders will alert this admin portal.');
-      button.textContent = '🔔 Notifications Enabled';
-      button.disabled = true;
-      try {
-        new Notification('KAELHAX Admin', {
-          body: 'Order notifications are now enabled.',
-          icon: '/assets/kaelhax-logo.png',
-        });
-      } catch (_) {}
-    } else if (permission === 'denied') {
-      setNotificationStatus('Notifications blocked. Allow them in your browser/site settings.');
-    } else {
-      setNotificationStatus('Notification permission was not granted.');
-    }
-  } catch (_) {
-    setNotificationStatus('Unable to request notification permission.');
-  }
+    if ('vibrate' in navigator) navigator.vibrate(70);
+  } catch (_) {}
+
+  adminAudioUnlocked = audioReady;
+  button.textContent = '✅ Sound & Vibration Enabled';
+  button.disabled = false;
+
+  setNotificationStatus(
+    audioReady
+      ? 'Custom order bubble, sound and vibration are enabled.'
+      : 'Custom order bubble and vibration are enabled; this browser blocked audio.'
+  );
+}
+
+function closeOrderToast() {
+  const toast = document.getElementById('orderNotificationToast');
+  if (!toast) return;
+  toast.classList.remove('show', 'pulse');
 }
 
 function showOrderToast(order) {
@@ -2195,32 +2273,30 @@ function showOrderToast(order) {
   }
 
   toast.innerHTML = `
-    <strong>🛒 New Order Received</strong>
-    <span>${esc(order.buyer_name || 'Buyer')} • ${esc(order.product || 'Order')} • ${esc(order.amount || '')}</span>
-    <a href="index.php?page=admin&tab=orders">Open Admin Orders →</a>
+    <div class="order-notification-inner">
+      <div class="order-notification-icon" aria-hidden="true">🛒</div>
+      <div class="order-notification-copy">
+        <strong>New Order Received</strong>
+        <span>${esc(order.buyer_name || 'Buyer')} • ${esc(order.product || 'Order')} • ${esc(order.amount || '')}</span>
+        <a href="index.php?page=admin&tab=orders">Open Admin Orders →</a>
+      </div>
+      <button type="button" class="order-notification-close" aria-label="Close" onclick="closeOrderToast()">×</button>
+    </div>
   `;
-  toast.classList.add('show');
+
+  toast.classList.remove('show', 'pulse');
+  void toast.offsetWidth;
+  toast.classList.add('show', 'pulse');
+
   clearTimeout(window.__orderToastTimer);
-  window.__orderToastTimer = setTimeout(() => toast.classList.remove('show'), 7000);
+  window.__orderToastTimer = setTimeout(() => {
+    toast.classList.remove('show', 'pulse');
+  }, 9000);
 }
 
 function notifyNewOrder(order) {
   showOrderToast(order);
-
-  if ('Notification' in window && Notification.permission === 'granted') {
-    try {
-      const notification = new Notification('🛒 New Order', {
-        body: `${order.buyer_name || 'Buyer'} • ${order.product || 'Order'} • ${order.amount || ''}`,
-        icon: '/assets/kaelhax-logo.png',
-        tag: `order-${order.id}`,
-        requireInteraction: false,
-      });
-      notification.onclick = () => {
-        window.focus();
-        window.location.href = 'index.php?page=admin&tab=orders';
-      };
-    } catch (_) {}
-  }
+  playAdminOrderAlert();
 }
 
 function initAdminOrderNotifications() {
@@ -2228,18 +2304,10 @@ function initAdminOrderNotifications() {
 
   const button = document.getElementById('enableAdminNotifications');
   if (button) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      button.textContent = '🔔 Notifications Enabled';
-      button.disabled = true;
-      setNotificationStatus('Notifications enabled. Watching for new orders.');
-    } else if (!('Notification' in window)) {
-      button.disabled = true;
-      setNotificationStatus('Browser notifications are not supported here.');
-    } else {
-      setNotificationStatus('Click Enable Order Notifications to receive browser alerts.');
-    }
     button.addEventListener('click', enableAdminNotifications);
   }
+
+  setNotificationStatus('Watching for new orders. Tap Enable Sound & Vibration once for audio + vibration feedback.');
 
   let initialized = false;
   let latestCreatedAt = '';
@@ -2303,7 +2371,7 @@ function initAdminOrderNotifications() {
   }
 
   pollOrders();
-  window.__kaelhaxOrderPoll = window.setInterval(pollOrders, 10000);
+  window.__kaelhaxOrderPoll = window.setInterval(pollOrders, 5000);
 }
 
 const installButton = document.getElementById('installPwaButton');
@@ -2411,6 +2479,15 @@ function openOrder(slug,tierIndex){
 function switchAuth(mode){const login=document.getElementById('loginForm'),reg=document.getElementById('registerForm'),tLogin=document.getElementById('tabLogin'),tReg=document.getElementById('tabRegister'); if(!login||!reg)return; if(tLogin)tLogin.classList.toggle('active',mode==='login'); if(tReg)tReg.classList.toggle('active',mode==='register'); login.style.display=mode==='login'?'block':'none'; reg.style.display=mode==='register'?'block':'none'}
 document.getElementById('modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
 initAdminOrderNotifications();
+
+if (isAdminPortal) {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && typeof window.__kaelhaxOrderPoll === 'number') {
+      // The regular interval continues; this just wakes the page sooner after returning.
+    }
+  });
+}
+
 </script>
 </body>
 </html>
