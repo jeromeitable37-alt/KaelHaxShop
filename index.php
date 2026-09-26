@@ -179,20 +179,21 @@ if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD'
 if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kael-hax-shop.vercel.app');
 
 $defaultProducts = [
-    'digital-package' => [
-        'slug' => 'digital-package',
-        'category' => 'Digital Products',
-        'name' => 'Digital Package',
+    'injector' => [
+        'slug' => 'injector',
+        'category' => 'CODM',
+        'name' => 'KAELHAX INJECTOR | CODMGR',
         'image' => 'assets/injector.jpg',
         'promo' => false,
-        'details_title' => 'INFO DETAILS',
+        'details_title' => '👌 INFO DETAILS 👌',
         'details' => [
-            'Digital delivery',
-            'Manual order review',
-            'Receipt required',
-            'Buyer support available',
+            '3-7 Days Ban Only',
+            'Strong Bypass',
+            'Compatible to Low-End',
+            'Unlock All Skins',
+            'Can Play Brutal'
         ],
-        'price_title' => 'PRICELIST',
+        'price_title' => 'OFFICIAL PRICELIST',
         'tiers' => [
             ['7 Days Access', 100, null],
             ['15 Days Access', 150, null],
@@ -200,19 +201,20 @@ $defaultProducts = [
             ['Lifetime Access', 250, null],
         ],
     ],
-    'premium-package' => [
-        'slug' => 'premium-package',
-        'category' => 'Digital Products',
-        'name' => 'Premium Digital Package',
+    'codmgr-vip' => [
+        'slug' => 'codmgr-vip',
+        'category' => 'CODM',
+        'name' => 'KAELHAX VIP ACCESS | CODMGR',
         'image' => 'assets/codmgr-mod.jpg',
         'promo' => true,
-        'features' => ['Premium', 'Priority Support'],
-        'details_title' => 'FULL DETAILS',
+        'features' => ['LOADER', 'MOD'],
+        'details_title' => '👌 FULL DETAILS 👌',
         'details' => [
-            'Manual order review',
-            'Receipt required',
-            'Premium support',
-            'Digital delivery',
+            '3-7 Days Ban Only',
+            'No Auto Ban',
+            'Strong Bypass',
+            'Unlock All Skins & Mythic Attachments',
+            'Easy LB this season'
         ],
         'price_title' => 'PRICELIST PROMO',
         'tiers' => [
@@ -344,15 +346,47 @@ function ensure_users_file() {
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
     if (!file_exists(users_file())) @file_put_contents(users_file(), "[]");
 }
+function users_redis_key() { return 'kaelhax:users:v1'; }
 function load_users() {
+    if (function_exists('upstash_configured') && upstash_configured()) {
+        [$ok, $result] = upstash_request(['GET', users_redis_key()]);
+        if ($ok && is_string($result) && $result !== '') {
+            $users = json_decode($result, true);
+            return is_array($users) ? $users : [];
+        }
+
+        /* One-time migration of legacy local users when Redis is empty. */
+        ensure_users_file();
+        $json = @file_get_contents(users_file());
+        $legacy = json_decode($json ?: '[]', true);
+        $legacy = is_array($legacy) ? array_values($legacy) : [];
+        if ($legacy) save_users($legacy);
+        return $legacy;
+    }
+
     ensure_users_file();
     $json = @file_get_contents(users_file());
     $users = json_decode($json ?: '[]', true);
     return is_array($users) ? $users : [];
 }
 function save_users($users) {
+    $users = array_values(array_filter($users, function ($user) {
+        return is_array($user) && !empty($user['username']);
+    }));
+
+    if (function_exists('upstash_configured') && upstash_configured()) {
+        $json = json_encode($users, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) return false;
+        [$ok] = upstash_request(['SET', users_redis_key(), $json]);
+        return $ok;
+    }
+
     ensure_users_file();
-    @file_put_contents(users_file(), json_encode(array_values($users), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    return @file_put_contents(
+        users_file(),
+        json_encode($users, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        LOCK_EX
+    ) !== false;
 }
 
 function orders_file() { return __DIR__ . '/data/orders.json'; }
@@ -591,6 +625,192 @@ function save_orders($orders) {
     ) !== false;
 }
 
+/* -------------------- WEB CHAT / SUPPORT STORAGE -------------------- */
+function chat_root_key() { return 'kaelhax:chats:v1'; }
+function chat_identity($username) {
+    return strtolower(trim((string)$username));
+}
+function chat_conversation_id($username) {
+    return hash('sha256', chat_identity($username));
+}
+function normalize_external_link($url) {
+    $url = trim((string)$url);
+    if ($url === '') return '';
+    if (!filter_var($url, FILTER_VALIDATE_URL)) return '';
+    $scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+    return in_array($scheme, ['http', 'https'], true) ? $url : '';
+}
+function chat_get_conversation($username) {
+    $username = chat_identity($username);
+    if ($username === '') return null;
+
+    if (upstash_configured()) {
+        [$ok, $result] = upstash_request([
+            'HGET',
+            chat_root_key(),
+            chat_conversation_id($username)
+        ]);
+
+        if ($ok && is_string($result) && $result !== '') {
+            $conversation = json_decode($result, true);
+            return is_array($conversation) ? $conversation : null;
+        }
+        return null;
+    }
+
+    $file = __DIR__ . '/data/chats.json';
+    if (!is_dir(dirname($file))) @mkdir(dirname($file), 0755, true);
+    if (!file_exists($file)) @file_put_contents($file, '{}', LOCK_EX);
+
+    $all = json_decode(@file_get_contents($file) ?: '{}', true);
+    if (!is_array($all)) $all = [];
+    return isset($all[chat_identity($username)]) && is_array($all[chat_identity($username)])
+        ? $all[chat_identity($username)]
+        : null;
+}
+function chat_save_conversation($conversation) {
+    if (!is_array($conversation)) return false;
+    $username = chat_identity($conversation['username'] ?? '');
+    if ($username === '') return false;
+
+    $conversation['username'] = $username;
+    $conversation['updated_at'] = date('c');
+
+    $json = json_encode($conversation, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) return false;
+
+    if (upstash_configured()) {
+        [$ok] = upstash_request([
+            'HSET',
+            chat_root_key(),
+            chat_conversation_id($username),
+            $json
+        ]);
+        return $ok;
+    }
+
+    $file = __DIR__ . '/data/chats.json';
+    if (!is_dir(dirname($file))) @mkdir(dirname($file), 0755, true);
+    if (!file_exists($file)) @file_put_contents($file, '{}', LOCK_EX);
+
+    $all = json_decode(@file_get_contents($file) ?: '{}', true);
+    if (!is_array($all)) $all = [];
+    $all[$username] = $conversation;
+
+    return @file_put_contents(
+        $file,
+        json_encode($all, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        LOCK_EX
+    ) !== false;
+}
+function chat_add_message($username, $senderType, $senderName, $message, $link = '') {
+    $username = chat_identity($username);
+    $message = trim((string)$message);
+    $link = normalize_external_link($link);
+
+    if ($username === '' || $message === '') return false;
+    if (!in_array($senderType, ['buyer', 'admin'], true)) return false;
+
+    $conversation = chat_get_conversation($username);
+    if (!is_array($conversation)) {
+        $conversation = [
+            'username' => $username,
+            'created_at' => date('c'),
+            'updated_at' => date('c'),
+            'messages' => [],
+        ];
+    }
+
+    if (!isset($conversation['messages']) || !is_array($conversation['messages'])) {
+        $conversation['messages'] = [];
+    }
+
+    $conversation['messages'][] = [
+        'id' => bin2hex(random_bytes(8)),
+        'sender_type' => $senderType,
+        'sender_name' => trim((string)$senderName) ?: ($senderType === 'admin' ? 'Admin' : $username),
+        'message' => $message,
+        'link' => $link,
+        'created_at' => date('c'),
+        'read_by_admin' => $senderType === 'admin',
+        'read_by_buyer' => $senderType === 'buyer',
+    ];
+
+    return chat_save_conversation($conversation);
+}
+function chat_mark_read($username, $readerType) {
+    if (!in_array($readerType, ['buyer', 'admin'], true)) return false;
+    $conversation = chat_get_conversation($username);
+    if (!is_array($conversation) || empty($conversation['messages']) || !is_array($conversation['messages'])) return false;
+
+    $changed = false;
+    foreach ($conversation['messages'] as &$message) {
+        $field = $readerType === 'admin' ? 'read_by_admin' : 'read_by_buyer';
+        if (empty($message[$field])) {
+            $message[$field] = true;
+            $changed = true;
+        }
+    }
+    unset($message);
+
+    return $changed ? chat_save_conversation($conversation) : true;
+}
+function chat_list_conversations() {
+    $rows = [];
+
+    if (upstash_configured()) {
+        [$ok, $result] = upstash_request([
+            'HGETALL',
+            chat_root_key()
+        ]);
+
+        if (!$ok || !is_array($result)) return [];
+
+        for ($i = 0, $count = count($result); $i + 1 < $count; $i += 2) {
+            $conversation = json_decode((string)$result[$i + 1], true);
+            if (is_array($conversation) && !empty($conversation['username'])) {
+                $rows[] = $conversation;
+            }
+        }
+    } else {
+        $file = __DIR__ . '/data/chats.json';
+        if (file_exists($file)) {
+            $all = json_decode(@file_get_contents($file) ?: '{}', true);
+            if (is_array($all)) {
+                foreach ($all as $conversation) {
+                    if (is_array($conversation) && !empty($conversation['username'])) {
+                        $rows[] = $conversation;
+                    }
+                }
+            }
+        }
+    }
+
+    usort($rows, function ($a, $b) {
+        return strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''));
+    });
+
+    return $rows;
+}
+function chat_unread_count($conversation, $readerType) {
+    if (!is_array($conversation) || !is_array($conversation['messages'] ?? null)) return 0;
+    $field = $readerType === 'admin' ? 'read_by_admin' : 'read_by_buyer';
+    $count = 0;
+    foreach ($conversation['messages'] as $message) {
+        if (empty($message[$field])) $count++;
+    }
+    return $count;
+}
+function chat_render_message($message) {
+    $safeText = e((string)($message['message'] ?? ''));
+    $safeText = preg_replace(
+        '~(https?://[^\s<]+)~i',
+        '<a class="chat-inline-link" href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+        $safeText
+    );
+    return nl2br($safeText);
+}
+
 function new_order_id() {
     return 'KM-' . date('ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
 }
@@ -614,14 +834,13 @@ function receipt_upload_error_message($code) {
 }
 function cloudinary_config() {
     /*
-     * Preferred Production configuration:
+     * Preferred Vercel Production variables:
      *   CLOUDINARY_CLOUD_NAME
      *   CLOUDINARY_API_KEY
      *   CLOUDINARY_API_SECRET
      *
-     * CLOUDINARY_URL remains supported as an all-or-nothing fallback.
-     * We never mix values from the two credential sources because that can
-     * create credential mismatches.
+     * CLOUDINARY_URL remains a complete fallback. We never mix credentials
+     * between the two sources.
      */
     $cloudName = trim((string)(getenv('CLOUDINARY_CLOUD_NAME') ?: ''));
     $apiKey = trim((string)(getenv('CLOUDINARY_API_KEY') ?: ''));
@@ -635,20 +854,13 @@ function cloudinary_config() {
         ];
     }
 
-    /* Use CLOUDINARY_URL only when the three separate variables are not complete. */
     $cloudinaryUrl = trim((string)(getenv('CLOUDINARY_URL') ?: ''));
-
     if ($cloudinaryUrl !== '') {
         $parts = parse_url($cloudinaryUrl);
-
         if (is_array($parts)) {
             $fallbackCloudName = trim((string)($parts['host'] ?? ''));
-            $fallbackApiKey = isset($parts['user'])
-                ? trim(urldecode((string)$parts['user']))
-                : '';
-            $fallbackApiSecret = isset($parts['pass'])
-                ? trim(urldecode((string)$parts['pass']))
-                : '';
+            $fallbackApiKey = isset($parts['user']) ? trim(urldecode((string)$parts['user'])) : '';
+            $fallbackApiSecret = isset($parts['pass']) ? trim(urldecode((string)$parts['pass'])) : '';
 
             if ($fallbackCloudName !== '' && $fallbackApiKey !== '' && $fallbackApiSecret !== '') {
                 return [
@@ -700,10 +912,7 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         $safeOrderId . '_' .
         bin2hex(random_bytes(6));
 
-    /*
-     * Backend authenticated upload using HTTP Basic Authentication.
-     * No signature or timestamp is generated in this flow.
-     */
+    /* Backend authenticated Upload API: no manual signature calculation. */
     $endpoint =
         'https://api.cloudinary.com/v1_1/' .
         rawurlencode($config['cloud_name']) .
@@ -745,24 +954,17 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     }
 
     $data = json_decode($response, true);
-
     if (!is_array($data)) {
         return [false, 'Cloudinary returned an invalid response.'];
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
-        $message =
-            $data['error']['message'] ??
-            'Cloudinary rejected the receipt upload.';
-
+        $message = $data['error']['message'] ?? 'Cloudinary rejected the receipt upload.';
         return [false, 'Cloudinary upload failed: ' . $message];
     }
 
     if (empty($data['secure_url'])) {
-        return [
-            false,
-            'Cloudinary uploaded the receipt but did not return a secure URL.'
-        ];
+        return [false, 'Cloudinary uploaded the receipt but did not return a secure URL.'];
     }
 
     return [true, [
@@ -775,6 +977,7 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         'filename' => basename($originalName),
     ]];
 }
+
 function save_receipt_upload($file, $orderId) {
     if (!isset($file) || !is_array($file)) {
         return [false, 'Please upload your payment receipt.'];
@@ -969,10 +1172,128 @@ function telegram_send_receipt($order, $receiptAbsolutePath, $mime) {
     return [$ok, $ok ? 'OK' : (is_string($result) ? $result : 'Telegram rejected the receipt.')];
 }
 
+// -------------------- ADMIN ORDER NOTIFICATION ENDPOINT --------------------
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'admin_order_notifications') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+
+    if (!is_admin()) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'error' => 'Unauthorized.']);
+        exit;
+    }
+
+    $since = trim((string)($_GET['since'] ?? ''));
+    $sinceTimestamp = $since !== '' ? strtotime($since) : false;
+    $sinceTimestamp = $sinceTimestamp === false ? 0 : $sinceTimestamp;
+
+    $orders = load_orders();
+    $newOrders = [];
+    $latestTimestamp = $sinceTimestamp;
+    $latestCreatedAt = '';
+
+    foreach ($orders as $order) {
+        $createdAt = (string)($order['created_at'] ?? '');
+        $timestamp = strtotime($createdAt);
+        if ($timestamp === false) {
+            continue;
+        }
+
+        if ($timestamp > $latestTimestamp) {
+            $latestTimestamp = $timestamp;
+            $latestCreatedAt = $createdAt;
+        } elseif ($timestamp === $latestTimestamp && $createdAt !== '') {
+            $latestCreatedAt = $createdAt;
+        }
+
+        if ($timestamp >= $sinceTimestamp && $timestamp > 0) {
+            $newOrders[] = [
+                'id' => (string)($order['id'] ?? ''),
+                'buyer_name' => (string)($order['buyer_name'] ?? ''),
+                'product' => (string)($order['product'] ?? ''),
+                'amount' => (string)($order['amount'] ?? ''),
+                'status' => (string)($order['status'] ?? 'pending'),
+                'created_at' => $createdAt,
+            ];
+        }
+    }
+
+    usort($newOrders, function ($a, $b) {
+        return strcmp((string)($a['created_at'] ?? ''), (string)($b['created_at'] ?? ''));
+    });
+
+    // Keep the response small. The browser also tracks IDs it has already seen.
+    if (count($newOrders) > 20) {
+        $newOrders = array_slice($newOrders, -20);
+    }
+
+    $pendingCount = 0;
+    foreach ($orders as $order) {
+        if (($order['status'] ?? 'pending') === 'pending') {
+            $pendingCount++;
+        }
+    }
+
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
+    echo json_encode([
+        'ok' => true,
+        'orders' => $newOrders,
+        'latest_created_at' => $latestCreatedAt,
+        'pending_count' => $pendingCount,
+        'server_time' => date('c'),
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // -------------------- POST ACTIONS --------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
     $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Your session expired. Please try again.'];
     redirect_page('shop');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_message') {
+    if (!is_user() && !is_admin()) redirect_page('account');
+
+    $message = trim((string)($_POST['message'] ?? ''));
+    $link = trim((string)($_POST['link'] ?? ''));
+
+    if ($message === '') {
+        $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Please enter a message.'];
+        redirect_page(is_admin() ? 'admin' : 'messages');
+    }
+
+    if (is_admin()) {
+        $username = chat_identity($_POST['username'] ?? '');
+        $back = 'index.php?page=admin&tab=messages&user=' . rawurlencode($username);
+        if ($username === '') {
+            $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Select a buyer conversation first.'];
+            redirect_to('index.php?page=admin&tab=messages');
+        }
+        $senderType = 'admin';
+        $senderName = 'Administrator';
+    } else {
+        $username = chat_identity($_SESSION['buyer_username'] ?? '');
+        $back = 'index.php?page=messages';
+        $senderType = 'buyer';
+        $senderName = $_SESSION['buyer_name'] ?? $username;
+    }
+
+    if (normalize_external_link($link) === '' && $link !== '') {
+        $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Please enter a valid http:// or https:// link.'];
+        redirect_to($back);
+    }
+
+    if (!chat_add_message($username, $senderType, $senderName, $message, $link)) {
+        $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Unable to save your message. Please try again.'];
+        redirect_to($back);
+    }
+
+    $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Message sent successfully.'];
+    redirect_to($back);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_order') {
@@ -1027,12 +1348,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 
     $orders = load_orders();
     $orders[] = $order;
-
     if (!save_orders($orders)) {
-        $_SESSION['flash'] = [
-            'type' => 'error',
-            'msg' => 'The receipt was uploaded, but the order could not be saved. Please try again.'
-        ];
+        $_SESSION['flash'] = ['type' => 'error', 'msg' => 'The receipt was uploaded, but the order could not be saved. Please try again.'];
         redirect_page('my-orders');
     }
 
@@ -1318,8 +1635,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
             }
         }
 
-        save_orders($orders);
-        if ($telegramResult && !$telegramResult[0]) {
+        if (!save_orders($orders)) {
+            $_SESSION['flash'] = ['type'=>'error','msg'=>'The order status could not be saved. Please try again.'];
+        } elseif ($telegramResult && !$telegramResult[0]) {
             $_SESSION['flash'] = ['type'=>'error','msg'=>'Order ' . $orderId . ' marked as ACCEPTED. ' . $telegramResult[1]];
         } elseif ($status === 'accepted' && $wasAlreadyTelegramSent) {
             $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' is already accepted and has already been sent to Telegram.'];
@@ -1346,8 +1664,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logou
     redirect_page($type === 'admin' ? 'admin' : 'account');
 }
 
-$page = $_GET['page'] ?? 'shop';
+$page = $_GET['page'] ?? 'account';
 $slug = $_GET['slug'] ?? '';
+
+/* Login-first experience: buyers must sign in before entering the storefront. */
+$protectedBuyerPages = ['shop', 'product', 'preview', 'promos', 'my-orders', 'messages'];
+if (!is_user() && !is_admin() && in_array($page, $protectedBuyerPages, true)) {
+    $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Please log in first to access the storefront.'];
+    $page = 'account';
+}
+
 $product = ($page === 'product' && isset($products[$slug])) ? $products[$slug] : null;
 if (!$siteSettings['shop_enabled'] && in_array($page, ['shop','product','preview','promos'], true) && !is_admin()) { $page = 'account'; $product = null; }
 $flash = $_SESSION['flash'] ?? null;
@@ -1376,6 +1702,11 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <base href="/">
 <meta name="theme-color" content="#0b0f15">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/assets/kaelhax-logo.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title><?= $page === 'product' && $product ? e($product['name']) . ' | ' . e($siteContent['site_name']) : e($siteContent['site_name']) . ' | ' . e($siteContent['site_brand']) ?></title>
 <style>
 :root{--bg:#0b0f15;--surface:#151b24;--surface2:#10161f;--line:#293341;--line2:#222c38;--text:#edf2f8;--muted:#9ca8b8;--blue:#72a6ff;--green:#51dc92;--danger:#ff7188;--shadow:0 22px 65px rgba(0,0,0,.34)}
@@ -1394,9 +1725,13 @@ main{width:min(1220px,100%);margin:auto;padding:30px 24px 62px}.content-head{mar
 footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;color:#7e8998;font-size:14px}
 .payment-box{margin:16px 0;padding:14px;border:1px solid var(--line);background:#111821;border-radius:15px;text-align:center}.payment-box h3{margin:0 0 8px;font-size:15px}.payment-box p{margin:0 0 11px;color:var(--muted);font-size:11px}.payment-qr{display:block;width:min(300px,100%);aspect-ratio:1080/1045;object-fit:contain;background:#fff;border-radius:12px;padding:8px;margin:0 auto 10px}.payment-note{font-size:10px;color:#7e8998;line-height:1.5}.order-card{border:1px solid var(--line);background:var(--surface);border-radius:17px;padding:16px;margin-top:12px}.order-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.order-id{font-weight:900}.order-meta{color:var(--muted);font-size:12px;line-height:1.6;margin-top:7px}.status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.status-pending{color:#f3d28a;border:1px solid #68552b;background:rgba(243,210,138,.06)}.status-accepted{color:var(--green);border:1px solid #275f44;background:rgba(81,220,146,.06)}.status-ignored{color:var(--danger);border:1px solid #6a3542;background:rgba(255,113,136,.06)}.admin-order-actions{display:flex;gap:8px;margin-top:13px}.admin-order-actions form{flex:1}.admin-order-actions button{width:100%;border-radius:11px;padding:10px 12px;font-weight:900;border:1px solid var(--line);background:#101720;color:#e7edf4}.admin-order-actions .accept{border-color:#275f44;color:#9be8bc;background:rgba(81,220,146,.04)}.admin-order-actions .ignore{border-color:#6a3542;color:#ffb1bd;background:rgba(255,113,136,.04)}.receipt-link{display:inline-flex;margin-top:10px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:10px;padding:8px 10px;font-weight:800;font-size:11px}
 .receipt-section{margin-top:12px;padding:12px;border:1px solid var(--line);background:#0d141c;border-radius:13px}.receipt-title{color:#9ca8b8;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}.receipt-view{display:block;width:min(100%,420px);max-height:420px;object-fit:contain;background:#fff;border:1px solid #33404f;border-radius:10px}.receipt-frame{display:block;width:100%;height:480px;border:1px solid #33404f;border-radius:10px;background:#fff}.receipt-link{display:inline-flex;margin-top:9px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:10px;padding:9px 11px;font-weight:800;font-size:11px}
+
+.chat-shell{border:1px solid var(--line);background:var(--surface);border-radius:18px;overflow:hidden;max-width:860px}.chat-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 16px;border-bottom:1px solid var(--line);background:#101720}.chat-header strong{display:block;font-size:15px}.chat-header span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.chat-status{display:inline-flex!important;border:1px solid #275f44;border-radius:999px;padding:5px 8px;color:var(--green)!important;font-size:9px!important;font-weight:900}.chat-thread{padding:16px;min-height:340px;max-height:540px;overflow:auto;background:#0b1017}.chat-row{display:flex;margin:8px 0}.chat-row.mine{justify-content:flex-end}.chat-row.theirs{justify-content:flex-start}.chat-bubble{max-width:min(78%,620px);border:1px solid #293341;background:#151d27;border-radius:15px;padding:10px 11px}.chat-row.mine .chat-bubble{background:#1a293a;border-color:#31506d}.chat-author{font-size:10px;color:var(--blue);font-weight:900;margin-bottom:5px}.chat-text{font-size:13px;line-height:1.5;color:#e4eaf1;word-break:break-word}.chat-inline-link{color:#89b8ff;text-decoration:underline}.chat-time{font-size:9px;color:#788496;margin-top:7px}.chat-link-btn{display:inline-flex;margin-top:8px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:9px;padding:7px 9px;font-size:10px;font-weight:900}.chat-empty{text-align:center;padding:70px 18px;color:#7f8b9a;font-size:12px;line-height:1.6}.chat-compose{padding:13px;border-top:1px solid var(--line);background:#101720}.chat-compose textarea{width:100%;min-height:90px;resize:vertical;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-compose-row{display:grid;grid-template-columns:1fr auto;gap:9px;margin-top:9px}.chat-compose-row input{width:100%;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-send{width:auto;min-width:150px;margin-top:0}.chat-admin-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:14px}.chat-inbox-list{display:grid;gap:8px;max-height:620px;overflow:auto}.chat-inbox-item{display:block;border:1px solid var(--line);background:#101720;border-radius:12px;padding:11px;color:inherit}.chat-inbox-item:hover,.chat-inbox-item.active{border-color:#31567f;background:#182332}.chat-inbox-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.chat-inbox-top strong{font-size:12px}.chat-inbox-preview{margin-top:5px;color:#b0bac7;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-inbox-time{margin-top:5px;color:#758091;font-size:9px}.chat-unread{display:inline-flex;min-width:20px;height:20px;align-items:center;justify-content:center;border-radius:999px;background:#70a6ff;color:#07101a;font-size:9px;font-weight:900}.chat-admin-thread{min-width:0}.admin-thread-header{margin:-18px -18px 0}.admin-thread-scroll{min-height:360px;max-height:560px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}.chat-admin-thread .chat-header{border-radius:16px 16px 0 0}
+
+.pwa-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 18px;padding:12px 13px;border:1px solid var(--line);background:#101720;border-radius:14px}.pwa-tools-left{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwa-tools button{border:1px solid var(--line);background:#18212b;color:#e7edf4;border-radius:10px;padding:9px 11px;font-size:11px;font-weight:900}.pwa-tools button.primary-tool{background:#70a6ff;color:#07101a;border-color:#70a6ff}.pwa-tools button:disabled{opacity:.55;cursor:not-allowed}.pwa-status{font-size:10px;color:#8e9aaa}.order-notification-toast{position:fixed;right:18px;bottom:18px;z-index:120;width:min(390px,calc(100vw - 28px));padding:14px 15px;border:1px solid #31567f;background:#121b27;color:#eef4fb;border-radius:15px;box-shadow:0 18px 55px rgba(0,0,0,.38);display:none}.order-notification-toast.show{display:block;animation:toastIn .22s ease-out}.order-notification-toast strong{display:block;font-size:13px}.order-notification-toast span{display:block;color:#aeb8c6;font-size:11px;margin-top:4px;line-height:1.45}.order-notification-toast a{display:inline-block;margin-top:9px;color:#91bcff;font-size:10px;font-weight:900}.pwa-install-note{font-size:10px;color:#778394;line-height:1.45}@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .modal-backdrop{position:fixed;z-index:90;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;padding:0}.modal-backdrop.open{display:flex}.modal{width:min(650px,100%);max-height:94vh;overflow:auto;background:#0d131b;border:1px solid var(--line);border-radius:21px 21px 0 0;padding:18px 15px 25px}.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.modal-head h2{margin:4px 0;font-size:24px}.modal-muted{color:var(--muted);margin:0;font-size:13px}.close{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);color:#cbd4df;border-radius:10px;font-size:24px}
-@media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}}
-@media(max-width:700px){.site-header{height:80px}.header-inner{padding:0 16px}.brand-logo{width:40px;height:40px}.brand-title{font-size:16px}.drawer{top:80px}.menu-backdrop{inset:80px 0 0}main{padding:23px 14px 49px}.content-head{margin-bottom:18px}.content-head h1{font-size:34px}.content-head p{font-size:14px}.shop-grid{grid-template-columns:1fr;gap:14px}.product-card{border-radius:19px}.product-info{padding:16px 14px 15px}.product-name{font-size:21px}.product-price{font-size:20px}.view-btn{padding:12px;font-size:17px}.product-meta h1{font-size:30px}.product-layout{gap:8px}.product-art{margin-top:17px;border-radius:15px}.price-panel{padding:16px;border-radius:17px}.price-panel h2{font-size:24px}.price-item{padding:12px 11px}.price-right{gap:8px}.amount{font-size:14px}.buy{padding:9px 10px}.details-panel{padding:16px}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.auth-shell{padding:18px 13px;min-height:calc(100vh - 80px);align-items:center}.auth-card{padding:19px 15px;border-radius:18px}.auth-card h1{font-size:26px}.admin-panel{grid-template-columns:1fr}.drawer-inner{padding:18px 15px}}
+@media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}.chat-admin-layout{grid-template-columns:1fr}.chat-inbox-list{max-height:260px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}}
+@media(max-width:700px){.chat-shell{border-radius:16px}.chat-thread{min-height:300px;padding:12px}.chat-bubble{max-width:88%}.chat-compose-row{grid-template-columns:1fr}.chat-send{width:100%;min-width:0}.chat-admin-thread .chat-header{margin:-16px -15px 0}.chat-admin-thread .chat-thread{margin:0 -15px}.chat-admin-thread .chat-compose{margin:0 -15px -16px}.site-header{height:80px}.header-inner{padding:0 16px}.brand-logo{width:40px;height:40px}.brand-title{font-size:16px}.drawer{top:80px}.menu-backdrop{inset:80px 0 0}main{padding:23px 14px 49px}.content-head{margin-bottom:18px}.content-head h1{font-size:34px}.content-head p{font-size:14px}.shop-grid{grid-template-columns:1fr;gap:14px}.product-card{border-radius:19px}.product-info{padding:16px 14px 15px}.product-name{font-size:21px}.product-price{font-size:20px}.view-btn{padding:12px;font-size:17px}.product-meta h1{font-size:30px}.product-layout{gap:8px}.product-art{margin-top:17px;border-radius:15px}.price-panel{padding:16px;border-radius:17px}.price-panel h2{font-size:24px}.price-item{padding:12px 11px}.price-right{gap:8px}.amount{font-size:14px}.buy{padding:9px 10px}.details-panel{padding:16px}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.auth-shell{padding:18px 13px;min-height:calc(100vh - 80px);align-items:center}.auth-card{padding:19px 15px;border-radius:18px}.auth-card h1{font-size:26px}.admin-panel{grid-template-columns:1fr}.drawer-inner{padding:18px 15px}}
 @media(max-width:390px){.brand-title small{display:none}.menu{padding:9px 11px}.menu span{font-size:14px}.drawer-title{font-size:21px}.product-name{font-size:20px}.price-item .amount{font-size:13px}.auth-card{padding:17px 13px}}
 </style>
 </head>
@@ -1412,7 +1747,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
   <div class="drawer-top"><div><div class="drawer-kicker">Navigation</div><div class="drawer-title">Project Market</div></div><button class="drawer-close" onclick="setMenu(false)">×</button></div>
   <div class="menu-group"><div class="group-title">Explore</div><?= menu_item('index.php?page=shop','Shop','▣','shop') ?><?= menu_item('index.php?page=preview','Preview','▧','preview') ?><?= menu_item('index.php?page=promos','Promos','◇','promos') ?></div>
   <div class="menu-group"><div class="group-title">Support</div><?= menu_item('index.php?page=concerns','Concerns','◌','concerns') ?><?= menu_item('index.php?page=terms','Terms','▤','terms') ?></div>
-  <div class="menu-group"><div class="group-title">Account</div><?= menu_item('index.php?page=account','Account','♙','account') ?><?= menu_item('index.php?page=my-orders','My Orders','◫','my-orders') ?></div>
+  <div class="menu-group"><div class="group-title">Account</div><?= menu_item('index.php?page=account','Account','♙','account') ?><?= menu_item('index.php?page=my-orders','My Orders','◫','my-orders') ?><?= menu_item('index.php?page=messages','Messages','✉','messages') ?></div>
   <div class="menu-group"><div class="group-title">Administration</div><?= menu_item('index.php?page=admin','Administrator Dashboard','♢','admin') ?></div>
   <div class="menu-group"><div class="group-title">Display</div><a class="menu-link" href="#" onclick="toggleDesktopPreview();return false"><span class="menu-icon">▱</span><span id="displayLabel">Desktop Mode</span></a></div>
   <div class="drawer-note">KAELHAX • Project Market<br>Mobile-first buyer storefront</div>
@@ -1466,6 +1801,53 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <?php endforeach; ?>
   <?php endif; ?>
 
+<?php elseif ($page === 'messages'): ?>
+  <?php
+    $chatUsername = chat_identity($_SESSION['buyer_username'] ?? '');
+    $buyerConversation = $chatUsername !== '' ? chat_get_conversation($chatUsername) : null;
+    chat_mark_read($chatUsername, 'buyer');
+    $buyerConversation = $chatUsername !== '' ? chat_get_conversation($chatUsername) : $buyerConversation;
+  ?>
+  <section class="content-head">
+    <div class="kicker">Support</div>
+    <h1>Messages</h1>
+    <p>Chat directly with the administrator about your account, orders, or general support.</p>
+  </section>
+  <section class="chat-shell">
+    <div class="chat-header">
+      <div><strong>Administrator Support</strong><span>Web chat</span></div>
+      <span class="chat-status">ONLINE PORTAL</span>
+    </div>
+    <div class="chat-thread">
+      <?php if (!$buyerConversation || empty($buyerConversation['messages'])): ?>
+        <div class="chat-empty">No messages yet.<br>Send a message below to start a conversation.</div>
+      <?php else: ?>
+        <?php foreach ($buyerConversation['messages'] as $message): ?>
+          <div class="chat-row <?= ($message['sender_type'] ?? '') === 'buyer' ? 'mine' : 'theirs' ?>">
+            <div class="chat-bubble">
+              <div class="chat-author"><?= e($message['sender_name'] ?? (($message['sender_type'] ?? '') === 'admin' ? 'Administrator' : 'You')) ?></div>
+              <div class="chat-text"><?= chat_render_message($message) ?></div>
+              <?php if (!empty($message['link'])): ?>
+                <a class="chat-link-btn" href="<?= e($message['link']) ?>" target="_blank" rel="noopener noreferrer">🔗 Open Link</a>
+              <?php endif; ?>
+              <div class="chat-time"><?= e(date('M d, Y g:i A', strtotime($message['created_at'] ?? 'now'))) ?></div>
+            </div>
+          </div>
+        <?php endforeach; ?>
+      <?php endif; ?>
+    </div>
+    <form method="post" class="chat-compose">
+      <input type="hidden" name="action" value="send_message">
+      <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+      <textarea name="message" rows="3" maxlength="3000" placeholder="Type your message..." required></textarea>
+      <div class="chat-compose-row">
+        <input name="link" type="url" maxlength="2000" placeholder="Optional external link (https://...)" inputmode="url">
+        <button class="primary chat-send" type="submit">Send Message</button>
+      </div>
+      <div class="notice">Links are opened in a new tab. Only use links you trust.</div>
+    </form>
+  </section>
+
 <?php elseif ($page === 'account'): ?>
   <?php if (is_user()): ?>
     <section class="content-head"><div class="kicker">Account</div><h1><?= e($siteContent['account_title']) ?></h1><p><?= e($siteContent['account_description']) ?></p></section>
@@ -1494,10 +1876,18 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     ?>
     <section class="content-head"><div class="kicker">Administration</div><h1>Administrator Dashboard</h1><p>Manage website content, products, pricing, buyers, promotions, orders, Telegram, and settings.</p></section>
     <nav class="admin-nav">
-      <?php foreach ([['dashboard','Dashboard'],['content','Website Content'],['products','Products'],['orders','Orders'],['buyers','Buyers'],['promos','Promotions'],['telegram','Telegram'],['settings','Settings']] as $nav): ?>
+      <?php foreach ([['dashboard','Dashboard'],['content','Website Content'],['products','Products'],['orders','Orders'],['buyers','Buyers'],['messages','Messages'],['promos','Promotions'],['telegram','Telegram'],['settings','Settings']] as $nav): ?>
         <a class="<?= $tab === $nav[0] ? 'active' : '' ?>" href="index.php?page=admin&tab=<?= e($nav[0]) ?>"><?= e($nav[1]) ?></a>
       <?php endforeach; ?>
     </nav>
+
+    <div class="pwa-tools">
+      <div class="pwa-tools-left">
+        <button type="button" id="enableAdminNotifications" class="primary-tool">🔔 Enable Order Notifications</button>
+        <button type="button" id="installPwaButton" style="display:none">📲 Install App</button>
+      </div>
+      <span id="adminNotificationStatus" class="pwa-status">Checking notification status…</span>
+    </div>
 
     <?php if ($tab === 'dashboard'): ?>
       <div class="admin-panel">
@@ -1636,7 +2026,87 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <?php elseif ($tab === 'buyers'): ?>
       <section class="admin-card"><h2>Buyer Management</h2><p>Review registered buyer accounts and enable or disable access.</p><div class="table-wrap"><table class="admin-table"><thead><tr><th>Username</th><th>Display Name</th><th>Registered</th><th>Status</th><th>Action</th></tr></thead><tbody><?php foreach($buyers as $b): $bst=($b['status']??'active'); ?><tr><td>@<?= e($b['username']) ?></td><td><?= e($b['display_name']) ?></td><td><?= e(date('M d, Y',strtotime($b['created_at']??'now'))) ?></td><td><span class="<?= $bst==='active'?'status-active':'status-disabled' ?>"><?= e(strtoupper($bst)) ?></span></td><td><form method="post"><input type="hidden" name="action" value="update_buyer_status"><input type="hidden" name="username" value="<?= e($b['username']) ?>"><input type="hidden" name="status" value="<?= $bst==='active'?'disabled':'active' ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn" type="submit"><?= $bst==='active'?'Disable':'Enable' ?></button></form></td></tr><?php endforeach; ?></tbody></table></div></section>
 
-    <?php elseif ($tab === 'promos'): ?>
+    <?php elseif ($tab === 'messages'): ?>
+      <?php
+        $conversations = chat_list_conversations();
+        $selectedChatUser = chat_identity($_GET['user'] ?? '');
+        if ($selectedChatUser === '' && !empty($conversations[0]['username'])) {
+            $selectedChatUser = chat_identity($conversations[0]['username']);
+        }
+        $selectedConversation = $selectedChatUser !== '' ? chat_get_conversation($selectedChatUser) : null;
+        if ($selectedChatUser !== '') {
+            chat_mark_read($selectedChatUser, 'admin');
+            $selectedConversation = chat_get_conversation($selectedChatUser);
+        }
+      ?>
+      <div class="chat-admin-layout">
+        <section class="admin-card chat-inbox">
+          <h2>Message Inbox</h2>
+          <p>Buyer conversations are stored persistently in Redis when Upstash is configured.</p>
+          <?php if (!$conversations): ?>
+            <div class="info-box"><strong>No conversations yet.</strong><div class="notice">Buyer messages will appear here automatically.</div></div>
+          <?php else: ?>
+            <div class="chat-inbox-list">
+              <?php foreach ($conversations as $conversation): ?>
+                <?php
+                  $cu = chat_identity($conversation['username'] ?? '');
+                  $messages = is_array($conversation['messages'] ?? null) ? $conversation['messages'] : [];
+                  $last = !empty($messages) ? $messages[count($messages)-1] : [];
+                  $unread = chat_unread_count($conversation, 'admin');
+                ?>
+                <a class="chat-inbox-item <?= $cu === $selectedChatUser ? 'active' : '' ?>" href="index.php?page=admin&tab=messages&user=<?= rawurlencode($cu) ?>">
+                  <div class="chat-inbox-top"><strong>@<?= e($cu) ?></strong><?php if ($unread): ?><span class="chat-unread"><?= e($unread) ?></span><?php endif; ?></div>
+                  <div class="chat-inbox-preview"><?= e((string)($last['message'] ?? 'No messages')) ?></div>
+                  <div class="chat-inbox-time"><?= !empty($last['created_at']) ? e(date('M d, Y g:i A', strtotime($last['created_at']))) : '—' ?></div>
+                </a>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+        </section>
+
+        <section class="admin-card chat-admin-thread">
+          <?php if (!$selectedConversation): ?>
+            <h2>Select a conversation</h2>
+            <p>Choose a buyer from the inbox to view and reply to the conversation.</p>
+          <?php else: ?>
+            <div class="chat-header admin-thread-header">
+              <div><strong>@<?= e($selectedChatUser) ?></strong><span>Buyer support conversation</span></div>
+              <a class="small-btn" href="index.php?page=admin&tab=orders">View Orders</a>
+            </div>
+            <div class="chat-thread admin-thread-scroll">
+              <?php if (empty($selectedConversation['messages'])): ?>
+                <div class="chat-empty">No messages in this conversation.</div>
+              <?php else: ?>
+                <?php foreach ($selectedConversation['messages'] as $message): ?>
+                  <div class="chat-row <?= ($message['sender_type'] ?? '') === 'admin' ? 'mine' : 'theirs' ?>">
+                    <div class="chat-bubble">
+                      <div class="chat-author"><?= e($message['sender_name'] ?? 'User') ?></div>
+                      <div class="chat-text"><?= chat_render_message($message) ?></div>
+                      <?php if (!empty($message['link'])): ?>
+                        <a class="chat-link-btn" href="<?= e($message['link']) ?>" target="_blank" rel="noopener noreferrer">🔗 Open Link</a>
+                      <?php endif; ?>
+                      <div class="chat-time"><?= e(date('M d, Y g:i A', strtotime($message['created_at'] ?? 'now'))) ?></div>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              <?php endif; ?>
+            </div>
+            <form method="post" class="chat-compose">
+              <input type="hidden" name="action" value="send_message">
+              <input type="hidden" name="username" value="<?= e($selectedChatUser) ?>">
+              <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+              <textarea name="message" rows="3" maxlength="3000" placeholder="Reply to @<?= e($selectedChatUser) ?>..." required></textarea>
+              <div class="chat-compose-row">
+                <input name="link" type="url" maxlength="2000" placeholder="Optional external link (https://...)" inputmode="url">
+                <button class="primary chat-send" type="submit">Send Reply</button>
+              </div>
+              <div class="notice">External links open in a new tab. Verify links before sharing.</div>
+            </form>
+          <?php endif; ?>
+        </section>
+      </div>
+
+<?php elseif ($tab === 'promos'): ?>
       <section class="admin-card"><h2>Promotion Manager</h2><p>Products marked as Promotion appear on the public Promos page.</p><?php foreach($products as $p): ?><div class="product-admin-card"><div class="product-admin-top"><div><h3><?= e($p['name']) ?></h3><div class="muted-block">Current status: <?= !empty($p['promo'])?'PROMO':'REGULAR' ?></div></div><form method="post"><input type="hidden" name="action" value="save_product"><input type="hidden" name="slug" value="<?= e($p['slug']) ?>"><input type="hidden" name="category" value="<?= e($p['category']) ?>"><input type="hidden" name="name" value="<?= e($p['name']) ?>"><input type="hidden" name="image" value="<?= e($p['image']) ?>"><input type="hidden" name="details_title" value="<?= e($p['details_title']) ?>"><input type="hidden" name="price_title" value="<?= e($p['price_title']) ?>"><input type="hidden" name="features" value="<?= e(implode(', ',$p['features']??[])) ?>"><input type="hidden" name="details" value="<?= e(implode("\n",$p['details']??[])) ?>"><?php foreach(($p['tiers']??[]) as $i=>$t): ?><input type="hidden" name="tier_name[<?= $i ?>]" value="<?= e($t[0]) ?>"><input type="hidden" name="tier_price[<?= $i ?>]" value="<?= e($t[1]) ?>"><input type="hidden" name="tier_stock[<?= $i ?>]" value="<?= e($t[2]??'') ?>"><?php endforeach; ?><input type="hidden" name="promo" value="<?= empty($p['promo'])?'1':'' ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn <?= !empty($p['promo'])?'primary':'' ?>" type="submit"><?= !empty($p['promo'])?'Remove Promo':'Mark Promo' ?></button></form></div></div><?php endforeach; ?></section>
 
     <?php elseif ($tab === 'telegram'): ?>
@@ -1669,6 +2139,194 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
 <div id="modalBackdrop" class="modal-backdrop"><div id="modal" class="modal"></div></div>
 <script>
+const isAdminPortal = <?= is_admin() ? 'true' : 'false' ?>;
+let deferredInstallPrompt = null;
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {});
+  });
+}
+
+function setNotificationStatus(message) {
+  const el = document.getElementById('adminNotificationStatus');
+  if (el) el.textContent = message;
+}
+
+async function enableAdminNotifications() {
+  const button = document.getElementById('enableAdminNotifications');
+  if (!button) return;
+
+  if (!('Notification' in window)) {
+    setNotificationStatus('Browser notifications are not supported here.');
+    button.disabled = true;
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationStatus('Notifications enabled. New orders will alert this admin portal.');
+      button.textContent = '🔔 Notifications Enabled';
+      button.disabled = true;
+      try {
+        new Notification('KAELHAX Admin', {
+          body: 'Order notifications are now enabled.',
+          icon: '/assets/kaelhax-logo.png',
+        });
+      } catch (_) {}
+    } else if (permission === 'denied') {
+      setNotificationStatus('Notifications blocked. Allow them in your browser/site settings.');
+    } else {
+      setNotificationStatus('Notification permission was not granted.');
+    }
+  } catch (_) {
+    setNotificationStatus('Unable to request notification permission.');
+  }
+}
+
+function showOrderToast(order) {
+  let toast = document.getElementById('orderNotificationToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'orderNotificationToast';
+    toast.className = 'order-notification-toast';
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = `
+    <strong>🛒 New Order Received</strong>
+    <span>${esc(order.buyer_name || 'Buyer')} • ${esc(order.product || 'Order')} • ${esc(order.amount || '')}</span>
+    <a href="index.php?page=admin&tab=orders">Open Admin Orders →</a>
+  `;
+  toast.classList.add('show');
+  clearTimeout(window.__orderToastTimer);
+  window.__orderToastTimer = setTimeout(() => toast.classList.remove('show'), 7000);
+}
+
+function notifyNewOrder(order) {
+  showOrderToast(order);
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const notification = new Notification('🛒 New Order', {
+        body: `${order.buyer_name || 'Buyer'} • ${order.product || 'Order'} • ${order.amount || ''}`,
+        icon: '/assets/kaelhax-logo.png',
+        tag: `order-${order.id}`,
+        requireInteraction: false,
+      });
+      notification.onclick = () => {
+        window.focus();
+        window.location.href = 'index.php?page=admin&tab=orders';
+      };
+    } catch (_) {}
+  }
+}
+
+function initAdminOrderNotifications() {
+  if (!isAdminPortal) return;
+
+  const button = document.getElementById('enableAdminNotifications');
+  if (button) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      button.textContent = '🔔 Notifications Enabled';
+      button.disabled = true;
+      setNotificationStatus('Notifications enabled. Watching for new orders.');
+    } else if (!('Notification' in window)) {
+      button.disabled = true;
+      setNotificationStatus('Browser notifications are not supported here.');
+    } else {
+      setNotificationStatus('Click Enable Order Notifications to receive browser alerts.');
+    }
+    button.addEventListener('click', enableAdminNotifications);
+  }
+
+  let initialized = false;
+  let latestCreatedAt = '';
+  const storageKey = 'kaelhax_admin_seen_orders_v1';
+  let seenIds = [];
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    if (Array.isArray(saved)) seenIds = saved.filter(Boolean).slice(-100);
+  } catch (_) {}
+
+  async function pollOrders() {
+    try {
+      const url = new URL('index.php', window.location.href);
+      url.searchParams.set('action', 'admin_order_notifications');
+      if (latestCreatedAt) url.searchParams.set('since', latestCreatedAt);
+
+      const response = await fetch(url.toString(), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {'Accept': 'application/json'},
+      });
+
+      if (response.status === 401) {
+        setNotificationStatus('Admin session expired. Please log in again.');
+        return;
+      }
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (!data || !data.ok) return;
+
+      const orders = Array.isArray(data.orders) ? data.orders : [];
+
+      if (!initialized) {
+        for (const order of orders) {
+          if (order.id && !seenIds.includes(order.id)) seenIds.push(order.id);
+        }
+        latestCreatedAt = data.latest_created_at || latestCreatedAt;
+        seenIds = seenIds.slice(-100);
+        localStorage.setItem(storageKey, JSON.stringify(seenIds));
+        initialized = true;
+        setNotificationStatus('Watching for new orders. Pending: ' + Number(data.pending_count || 0));
+        return;
+      }
+
+      for (const order of orders) {
+        if (!order.id || seenIds.includes(order.id)) continue;
+        seenIds.push(order.id);
+        notifyNewOrder(order);
+      }
+
+      latestCreatedAt = data.latest_created_at || latestCreatedAt;
+      seenIds = seenIds.slice(-100);
+      localStorage.setItem(storageKey, JSON.stringify(seenIds));
+      setNotificationStatus('Watching for new orders. Pending: ' + Number(data.pending_count || 0));
+    } catch (_) {
+      // Keep polling quietly; transient network errors should not break the page.
+    }
+  }
+
+  pollOrders();
+  window.__kaelhaxOrderPoll = window.setInterval(pollOrders, 10000);
+}
+
+const installButton = document.getElementById('installPwaButton');
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  if (installButton) installButton.style.display = 'inline-block';
+});
+
+if (installButton) {
+  installButton.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    try { await deferredInstallPrompt.userChoice; } catch (_) {}
+    deferredInstallPrompt = null;
+    installButton.style.display = 'none';
+  });
+}
+
+window.addEventListener('appinstalled', () => {
+  if (installButton) installButton.style.display = 'none';
+});
+
 const products = <?= json_encode($products, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
 function setMenu(open){document.getElementById('drawer').classList.toggle('open',open);document.getElementById('menuBackdrop').classList.toggle('open',open);document.body.classList.toggle('lock',open)}
 function toggleDesktopPreview(){document.body.classList.toggle('desktop-preview');document.getElementById('displayLabel').textContent=document.body.classList.contains('desktop-preview')?'Mobile Mode':'Desktop Mode'}
@@ -1752,6 +2410,7 @@ function openOrder(slug,tierIndex){
 }
 function switchAuth(mode){const login=document.getElementById('loginForm'),reg=document.getElementById('registerForm'),tLogin=document.getElementById('tabLogin'),tReg=document.getElementById('tabRegister'); if(!login||!reg)return; if(tLogin)tLogin.classList.toggle('active',mode==='login'); if(tReg)tReg.classList.toggle('active',mode==='register'); login.style.display=mode==='login'?'block':'none'; reg.style.display=mode==='register'?'block':'none'}
 document.getElementById('modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
+initAdminOrderNotifications();
 </script>
 </body>
 </html>
