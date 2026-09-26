@@ -276,6 +276,21 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     $config = cloudinary_config();
     $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId);
     $publicId = 'payment-receipts/' . $safeOrderId . '_' . bin2hex(random_bytes(6));
+    $timestamp = time();
+
+    /*
+     * Cloudinary signed Upload API request.
+     * The upload endpoint expects signed request parameters rather than
+     * HTTP Basic authentication.
+     */
+    $signingParams = [
+        'public_id' => $publicId,
+        'timestamp' => $timestamp,
+    ];
+
+    ksort($signingParams);
+    $signatureBase = http_build_query($signingParams, '', '&', PHP_QUERY_RFC3986);
+    $signature = sha1($signatureBase . $config['api_secret']);
 
     $endpoint =
         'https://api.cloudinary.com/v1_1/' .
@@ -285,7 +300,9 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     $fields = [
         'file' => new CURLFile($tmpPath, $mime, basename($originalName)),
         'public_id' => $publicId,
-        'type' => 'upload',
+        'timestamp' => $timestamp,
+        'api_key' => $config['api_key'],
+        'signature' => $signature,
     ];
 
     $ch = curl_init($endpoint);
@@ -294,7 +311,6 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 30,
-        CURLOPT_USERPWD => $config['api_key'] . ':' . $config['api_secret'],
         CURLOPT_POSTFIELDS => $fields,
     ]);
 
@@ -305,13 +321,20 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     curl_close($ch);
 
     if ($response === false || $curlError !== '') {
-        return [false, 'Cloudinary connection failed: ' . ($curlError ?: 'Unknown connection error.')];
+        return [
+            false,
+            'Cloudinary connection failed: ' .
+            ($curlError ?: 'Unknown connection error.')
+        ];
     }
 
     $data = json_decode($response, true);
 
     if ($httpCode < 200 || $httpCode >= 300 || empty($data['secure_url'])) {
-        $message = $data['error']['message'] ?? 'Cloudinary rejected the receipt upload.';
+        $message =
+            $data['error']['message'] ??
+            'Cloudinary rejected the receipt upload.';
+
         return [false, 'Cloudinary upload failed: ' . $message];
     }
 
@@ -325,7 +348,6 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         'filename' => basename($originalName),
     ]];
 }
-
 function save_receipt_upload($file, $orderId) {
     if (!isset($file) || !is_array($file)) {
         return [false, 'Please upload your payment receipt.'];
@@ -908,6 +930,7 @@ function menu_item($href, $label, $icon, $pageKey) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<base href="/">
 <meta name="theme-color" content="#0b0f15">
 <title><?= $page === 'product' && $product ? e($product['name']) . ' | ' . e($siteContent['site_name']) : e($siteContent['site_name']) . ' | ' . e($siteContent['site_brand']) ?></title>
 <style>
@@ -1057,16 +1080,30 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
             <?php if (!empty($o['uid'])): ?><div class="order-meta">UID / Account: <?= e($o['uid']) ?></div><?php endif; ?>
             <?php if (!empty($o['note'])): ?><div class="order-meta">Note: <?= e($o['note']) ?></div><?php endif; ?>
             <div class="order-meta">Payment: <?= e($o['payment_method']) ?><br>Receipt: <?= e($o['receipt_filename'] ?? 'Uploaded') ?></div>
-            <?php $receiptUrl = $o['receipt_url'] ?? ($o['receipt'] ?? ''); ?>
-            <?php if (!empty($receiptUrl)): ?>
+            <?php
+              $receiptUrl = trim((string)($o['receipt_url'] ?? ''));
+              $legacyReceipt = trim((string)($o['receipt'] ?? ''));
+              if ($receiptUrl === '' && preg_match('/^https?:\/\//i', $legacyReceipt)) {
+                  $receiptUrl = $legacyReceipt;
+              }
+              $isCloudinaryReceipt = $receiptUrl !== '' && preg_match('/^https?:\/\//i', $receiptUrl);
+            ?>
+            <?php if ($isCloudinaryReceipt): ?>
               <div class="receipt-section">
                 <div class="receipt-title">PAYMENT RECEIPT</div>
                 <?php if (strpos((string)($o['receipt_mime'] ?? ''), 'image/') === 0): ?>
                   <img class="receipt-view" src="<?= e($receiptUrl) ?>" alt="Payment receipt for <?= e($o['id']) ?>" loading="lazy">
                 <?php elseif (($o['receipt_mime'] ?? '') === 'application/pdf'): ?>
                   <iframe class="receipt-frame" src="<?= e($receiptUrl) ?>" title="Payment receipt PDF"></iframe>
+                <?php else: ?>
+                  <div class="notice">Receipt uploaded successfully. Use the button below to open it.</div>
                 <?php endif; ?>
                 <a class="receipt-link" href="<?= e($receiptUrl) ?>" target="_blank" rel="noopener">🔍 View Full Receipt</a>
+              </div>
+            <?php elseif ($legacyReceipt !== ''): ?>
+              <div class="receipt-section">
+                <div class="receipt-title">PAYMENT RECEIPT</div>
+                <div class="notice">This order uses the old local receipt path. Please have the buyer submit the receipt again so it can be stored in Cloudinary.</div>
               </div>
             <?php else: ?>
               <div class="notice">No payment receipt was attached to this order.</div>
@@ -1119,7 +1156,36 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
     <?php elseif ($tab === 'orders'): ?>
       <section class="content-head"><div class="kicker">Orders</div><h2 style="font-size:25px;margin:8px 0 0">Pending Orders</h2></section>
-      <?php if(!$pendingOrders): ?><div class="info-box">No pending orders.</div><?php else: foreach($pendingOrders as $o): ?><article class="order-card"><div class="order-top"><div><div class="order-id"><?= e($o['id']) ?></div><div class="order-meta"><?= e($o['product']) ?><br><?= e($o['duration']) ?> • <?= e($o['amount']) ?><br>Buyer: <?= e($o['buyer_name']) ?> • <?= e($o['telegram_username']) ?></div></div><span class="status-pill status-pending">PENDING</span></div><div class="order-meta">Payment: <?= e($o['payment_method']) ?><?php if(!empty($o['uid'])):?><br>UID: <?= e($o['uid']) ?><?php endif;?></div><?php $receiptUrl = $o['receipt_url'] ?? ($o['receipt'] ?? ''); ?><?php if(!empty($receiptUrl)): ?><div class="receipt-section"><div class="receipt-title">PAYMENT RECEIPT</div><?php if(strpos((string)($o['receipt_mime'] ?? ''),'image/')===0): ?><img class="receipt-view" src="<?= e($receiptUrl) ?>" alt="Payment receipt for <?= e($o['id']) ?>" loading="lazy"><?php elseif(($o['receipt_mime'] ?? '') === 'application/pdf'): ?><iframe class="receipt-frame" src="<?= e($receiptUrl) ?>" title="Payment receipt PDF"></iframe><?php endif; ?><a class="receipt-link" href="<?= e($receiptUrl) ?>" target="_blank" rel="noopener">🔍 View Full Receipt</a></div><?php else: ?><div class="notice">No payment receipt was attached to this order.</div><?php endif; ?><div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
+      <?php if(!$pendingOrders): ?><div class="info-box">No pending orders.</div><?php else: foreach($pendingOrders as $o): ?><article class="order-card"><div class="order-top"><div><div class="order-id"><?= e($o['id']) ?></div><div class="order-meta"><?= e($o['product']) ?><br><?= e($o['duration']) ?> • <?= e($o['amount']) ?><br>Buyer: <?= e($o['buyer_name']) ?> • <?= e($o['telegram_username']) ?></div></div><span class="status-pill status-pending">PENDING</span></div><div class="order-meta">Payment: <?= e($o['payment_method']) ?><?php if(!empty($o['uid'])):?><br>UID: <?= e($o['uid']) ?><?php endif;?></div>
+      <?php
+        $receiptUrl = trim((string)($o['receipt_url'] ?? ''));
+        $legacyReceipt = trim((string)($o['receipt'] ?? ''));
+        if ($receiptUrl === '' && preg_match('/^https?:\/\//i', $legacyReceipt)) {
+            $receiptUrl = $legacyReceipt;
+        }
+        $isCloudinaryReceipt = $receiptUrl !== '' && preg_match('/^https?:\/\//i', $receiptUrl);
+      ?>
+      <?php if ($isCloudinaryReceipt): ?>
+        <div class="receipt-section">
+          <div class="receipt-title">PAYMENT RECEIPT</div>
+          <?php if (strpos((string)($o['receipt_mime'] ?? ''), 'image/') === 0): ?>
+            <img class="receipt-view" src="<?= e($receiptUrl) ?>" alt="Payment receipt for <?= e($o['id']) ?>" loading="lazy">
+          <?php elseif (($o['receipt_mime'] ?? '') === 'application/pdf'): ?>
+            <iframe class="receipt-frame" src="<?= e($receiptUrl) ?>" title="Payment receipt PDF"></iframe>
+          <?php else: ?>
+            <div class="notice">Receipt uploaded successfully. Use the button below to open it.</div>
+          <?php endif; ?>
+          <a class="receipt-link" href="<?= e($receiptUrl) ?>" target="_blank" rel="noopener">🔍 View Full Receipt</a>
+        </div>
+      <?php elseif ($legacyReceipt !== ''): ?>
+        <div class="receipt-section">
+          <div class="receipt-title">PAYMENT RECEIPT</div>
+          <div class="notice">This order uses the old local receipt path. Please have the buyer submit the receipt again so it can be stored in Cloudinary.</div>
+        </div>
+      <?php else: ?>
+        <div class="notice">No payment receipt was attached to this order.</div>
+      <?php endif; ?>
+      <div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
       <section class="content-head" style="margin-top:28px"><div class="kicker">History</div><h2 style="font-size:25px;margin:8px 0 0">Order History</h2></section>
       <?php if(!$adminOrders): ?><div class="info-box">No orders have been submitted yet.</div><?php else: ?><div class="table-wrap"><table class="admin-table"><thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody><?php foreach(array_slice($adminOrders,0,50) as $o): ?><tr><td><?= e($o['id']) ?></td><td><?= e($o['buyer_name']) ?></td><td><?= e($o['product']) ?></td><td><?= e($o['amount']) ?></td><td><span class="status-pill status-<?= e($o['status']??'pending') ?>"><?= e($o['status']??'pending') ?></span></td><td><?= e(date('M d, Y g:i A',strtotime($o['created_at']??'now'))) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
 
