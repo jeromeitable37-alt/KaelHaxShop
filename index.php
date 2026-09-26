@@ -236,25 +236,127 @@ function receipt_upload_error_message($code) {
     ];
     return $map[$code] ?? 'Unable to upload the receipt.';
 }
+function cloudinary_config() {
+    $cloudinaryUrl = getenv('CLOUDINARY_URL') ?: '';
+
+    if ($cloudinaryUrl === '') {
+        return [
+            'cloud_name' => '',
+            'api_key' => '',
+            'api_secret' => '',
+        ];
+    }
+
+    $parts = parse_url($cloudinaryUrl);
+
+    return [
+        'cloud_name' => (string)($parts['host'] ?? ''),
+        'api_key' => isset($parts['user']) ? urldecode((string)$parts['user']) : '',
+        'api_secret' => isset($parts['pass']) ? urldecode((string)$parts['pass']) : '',
+    ];
+}
+
+function cloudinary_configured() {
+    $config = cloudinary_config();
+
+    return $config['cloud_name'] !== ''
+        && $config['api_key'] !== ''
+        && $config['api_secret'] !== '';
+}
+
+function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
+    if (!cloudinary_configured()) {
+        return [false, 'Cloudinary is not configured. Please set CLOUDINARY_URL.'];
+    }
+
+    if (!file_exists($tmpPath) || !is_readable($tmpPath)) {
+        return [false, 'The uploaded receipt could not be read.'];
+    }
+
+    $config = cloudinary_config();
+    $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId);
+    $publicId = 'payment-receipts/' . $safeOrderId . '_' . bin2hex(random_bytes(6));
+
+    $endpoint =
+        'https://api.cloudinary.com/v1_1/' .
+        rawurlencode($config['cloud_name']) .
+        '/auto/upload';
+
+    $fields = [
+        'file' => new CURLFile($tmpPath, $mime, basename($originalName)),
+        'public_id' => $publicId,
+        'type' => 'upload',
+    ];
+
+    $ch = curl_init($endpoint);
+
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_USERPWD => $config['api_key'] . ':' . $config['api_secret'],
+        CURLOPT_POSTFIELDS => $fields,
+    ]);
+
+    $response = curl_exec($ch);
+    $curlError = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    if ($response === false || $curlError !== '') {
+        return [false, 'Cloudinary connection failed: ' . ($curlError ?: 'Unknown connection error.')];
+    }
+
+    $data = json_decode($response, true);
+
+    if ($httpCode < 200 || $httpCode >= 300 || empty($data['secure_url'])) {
+        $message = $data['error']['message'] ?? 'Cloudinary rejected the receipt upload.';
+        return [false, 'Cloudinary upload failed: ' . $message];
+    }
+
+    return [true, [
+        'url' => $data['secure_url'],
+        'public_id' => $data['public_id'] ?? $publicId,
+        'asset_id' => $data['asset_id'] ?? '',
+        'resource_type' => $data['resource_type'] ?? 'image',
+        'format' => $data['format'] ?? '',
+        'mime' => $mime,
+        'filename' => basename($originalName),
+    ]];
+}
+
 function save_receipt_upload($file, $orderId) {
-    ensure_orders_storage();
-    if (!isset($file) || !is_array($file)) return [false, 'Please upload your payment receipt.'];
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) return [false, receipt_upload_error_message((int)$file['error'])];
+    if (!isset($file) || !is_array($file)) {
+        return [false, 'Please upload your payment receipt.'];
+    }
+
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return [false, receipt_upload_error_message((int)$file['error'])];
+    }
+
     $size = (int)($file['size'] ?? 0);
-    if ($size <= 0 || $size > 5 * 1024 * 1024) return [false, 'Receipt must be between 1 byte and 5 MB.'];
+    if ($size <= 0 || $size > 5 * 1024 * 1024) {
+        return [false, 'Receipt must be between 1 byte and 5 MB.'];
+    }
+
     $tmp = $file['tmp_name'] ?? '';
-    if ($tmp === '' || !is_uploaded_file($tmp)) return [false, 'Invalid receipt upload.'];
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        return [false, 'Invalid receipt upload.'];
+    }
 
     $allowed = [
-        'image/jpeg' => 'jpg',
-        'image/jpg' => 'jpg',        'image/pjpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/webp' => 'webp',
-        'application/pdf' => 'pdf',
-        'application/x-pdf' => 'pdf',
+        'image/jpeg' => true,
+        'image/jpg' => true,
+        'image/pjpeg' => true,
+        'image/png' => true,
+        'image/webp' => true,
+        'application/pdf' => true,
+        'application/x-pdf' => true,
     ];
 
     $mime = 'application/octet-stream';
+
     if (class_exists('finfo')) {
         $finfo = new finfo(FILEINFO_MIME_TYPE);
         $mime = $finfo->file($tmp) ?: $mime;
@@ -262,15 +364,13 @@ function save_receipt_upload($file, $orderId) {
         $mime = @mime_content_type($tmp) ?: $mime;
     }
 
-    // Some Windows/mobile uploads report a generic MIME type even when the
-    // file itself is a valid JPG/PNG/WEBP/PDF. Verify the file contents as a
-    // fallback so legitimate receipts are not rejected.
+    /* Fallback validation for Windows/mobile uploads. */
     if (!isset($allowed[$mime])) {
         $ext = strtolower(pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
 
         if (in_array($ext, ['jpg', 'jpeg'], true) && function_exists('getimagesize')) {
             $info = @getimagesize($tmp);
-            if ($info && !empty($info['mime']) && in_array($info['mime'], ['image/jpeg', 'image/pjpeg'], true)) {
+            if ($info && in_array($info['mime'] ?? '', ['image/jpeg', 'image/pjpeg'], true)) {
                 $mime = 'image/jpeg';
             }
         } elseif ($ext === 'png' && function_exists('getimagesize')) {
@@ -295,11 +395,33 @@ function save_receipt_upload($file, $orderId) {
         return [false, 'Receipt must be a valid JPG, PNG, WEBP, or PDF file.'];
     }
 
-    $filename = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId) . '_' . bin2hex(random_bytes(4)) . '.' . $allowed[$mime];
-    $target = receipts_dir() . '/' . $filename;
-    if (!@move_uploaded_file($tmp, $target)) return [false, 'The server could not save the receipt.'];
-    return [true, ['path' => 'receipts/' . $filename, 'filename' => $filename, 'mime' => $mime]];
+    /*
+     * Production storage: upload the receipt directly to Cloudinary.
+     * The Vercel filesystem is not used as permanent receipt storage.
+     */
+    [$cloudinaryOk, $cloudinaryResult] = cloudinary_upload_receipt(
+        $tmp,
+        (string)($file['name'] ?? 'receipt'),
+        $mime,
+        $orderId
+    );
+
+    if (!$cloudinaryOk) {
+        return [false, $cloudinaryResult];
+    }
+
+    return [true, [
+        'path' => $cloudinaryResult['url'],
+        'url' => $cloudinaryResult['url'],
+        'filename' => $cloudinaryResult['filename'],
+        'mime' => $cloudinaryResult['mime'],
+        'public_id' => $cloudinaryResult['public_id'],
+        'asset_id' => $cloudinaryResult['asset_id'],
+        'resource_type' => $cloudinaryResult['resource_type'],
+        'format' => $cloudinaryResult['format'],
+    ]];
 }
+
 function telegram_configured() {
     global $siteSettings;
     return TELEGRAM_BOT_TOKEN !== '' && TELEGRAM_CHAT_ID !== '' && (($siteSettings['telegram_enabled'] ?? true) === true);
@@ -368,42 +490,34 @@ function telegram_send_order($caption) {
 
 function telegram_send_receipt($order, $receiptAbsolutePath, $mime) {
     if (!telegram_configured()) return [false, 'Telegram is not configured yet.'];
-    if (!file_exists($receiptAbsolutePath) || !is_readable($receiptAbsolutePath)) {
-        return [false, 'Receipt file is not readable.'];
-    }
+    if (!file_exists($receiptAbsolutePath) || !is_readable($receiptAbsolutePath)) return [false, 'Receipt file is not readable.'];
 
     $caption = '<b>🧾 PAYMENT RECEIPT</b>' . "\n\n" .
-        '<b>Order ID:</b> <code>' . e($order['id'] ?? '') . '</code>' . "\n" .
-        '<b>Buyer:</b> ' . e($order['buyer_name'] ?? '') . "\n" .
-        '<b>Product:</b> ' . e($order['product'] ?? '') . "\n" .
-        '<b>Amount:</b> ' . e($order['amount'] ?? '') . "\n" .
-        '<b>Payment:</b> ' . e($order['payment_method'] ?? '') . "\n" .
-        "\n" . '<b>Status:</b> ACCEPTED BY ADMIN';
+        '<b>Order ID:</b> <code>' . e($order['id']) . '</code>' . "\n" .
+        '<b>Buyer:</b> ' . e($order['buyer_name']) . "\n" .
+        '<b>Product:</b> ' . e($order['product']) . "\n" .
+        '<b>Amount:</b> ' . e($order['amount']) . "\n" .
+        '<b>Payment:</b> ' . e($order['payment_method']) . "\n" .
+        "\n" . '<b>Status:</b> PENDING ADMIN REVIEW';
 
-    /*
-     * Send the receipt as a Telegram DOCUMENT instead of a PHOTO.
-     * This keeps JPG/PNG/WEBP/PDF receipts together with the approved
-     * order banner and avoids photo-format restrictions.
-     */
-    $safeMime = (is_string($mime) && $mime !== '') ? $mime : 'application/octet-stream';
-    $fields = [
-        'chat_id' => TELEGRAM_CHAT_ID,
-        'document' => new CURLFile(
-            $receiptAbsolutePath,
-            $safeMime,
-            basename($receiptAbsolutePath)
-        ),
-        'caption' => $caption,
-        'parse_mode' => 'HTML',
-    ];
-
-    [$ok, $result] = telegram_request('sendDocument', $fields, true);
-
-    if (!$ok) {
-        return [false, is_string($result) ? $result : 'Telegram rejected the receipt upload.'];
+    if (strpos($mime, 'image/') === 0) {
+        $fields = [
+            'chat_id' => TELEGRAM_CHAT_ID,
+            'photo' => new CURLFile($receiptAbsolutePath, $mime, basename($receiptAbsolutePath)),
+            'caption' => $caption,
+            'parse_mode' => 'HTML',
+        ];
+        [$ok, $result] = telegram_request('sendPhoto', $fields, true);
+    } else {
+        $fields = [
+            'chat_id' => TELEGRAM_CHAT_ID,
+            'document' => new CURLFile($receiptAbsolutePath, $mime, basename($receiptAbsolutePath)),
+            'caption' => $caption,
+            'parse_mode' => 'HTML',
+        ];
+        [$ok, $result] = telegram_request('sendDocument', $fields, true);
     }
-
-    return [true, 'OK'];
+    return [$ok, $ok ? 'OK' : (is_string($result) ? $result : 'Telegram rejected the receipt.')];
 }
 
 // -------------------- POST ACTIONS --------------------
@@ -451,9 +565,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
         'payment_method' => strtoupper($payment ?: '—'),
         'uid' => $uid,
         'note' => $note,
-        'receipt' => $receipt['path'],
+        'receipt' => $receipt['url'],
+        'receipt_url' => $receipt['url'],
         'receipt_filename' => $receipt['filename'],
         'receipt_mime' => $receipt['mime'],
+        'receipt_cloudinary_public_id' => $receipt['public_id'],
+        'receipt_cloudinary_asset_id' => $receipt['asset_id'],
+        'receipt_cloudinary_resource_type' => $receipt['resource_type'],
+        'receipt_cloudinary_format' => $receipt['format'],
         'status' => 'pending',
     ];
 
@@ -505,6 +624,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
     $_SESSION['flash'] = ['type' => $ok ? 'success' : 'error', 'msg' => $ok ? 'Concern sent to Telegram successfully.' : ($msg ?: 'Unable to send concern.')];
     redirect_page('concerns');
 }
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer_register') {
     if (empty($siteSettings['registration_enabled'])) { $_SESSION['flash']=['type'=>'error','msg'=>'Buyer registration is currently disabled.']; redirect_page('account'); }
     $username = strtolower(trim($_POST['username'] ?? ''));
@@ -720,8 +840,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                 '<b>SHOP:</b> ' . e(SHOP_URL);
 
             [$bannerSent, $bannerMsg] = telegram_send_order($approvedCaption);
-            $receiptAbsolutePath = __DIR__ . '/' . ($approvedOrder['receipt'] ?? '');
-            [$receiptSent, $receiptMsg] = telegram_send_receipt($approvedOrder, $receiptAbsolutePath, $approvedOrder['receipt_mime'] ?? '');
+
+            /*
+             * The payment receipt is kept in Cloudinary and remains
+             * viewable in the Admin Orders page. It is NOT sent to Telegram.
+             */
+            $receiptSent = true;
+            $receiptMsg = 'Receipt kept in Admin / Cloudinary storage.';
 
             if ($bannerSent && $receiptSent) {
                 foreach ($orders as &$savedOrder) {
@@ -731,7 +856,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                     }
                 }
                 unset($savedOrder);
-                $telegramResult = [true, 'Approved order banner and receipt sent to Telegram.'];
+                $telegramResult = [true, 'Approved order banner sent to Telegram. Payment receipt remains available in Admin.'];
             } else {
                 $telegramResult = [false, 'Order accepted, but Telegram delivery failed. ' . (!$bannerSent ? $bannerMsg : $receiptMsg)];
             }
@@ -743,7 +868,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         } elseif ($status === 'accepted' && $wasAlreadyTelegramSent) {
             $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' is already accepted and has already been sent to Telegram.'];
         } elseif ($status === 'accepted') {
-            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' accepted. Banner and receipt sent to Telegram.'];
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' accepted. Banner sent to Telegram; payment receipt remains available in Admin.'];
         } else {
             $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' marked as ' . strtoupper($status) . '.'];
         }
@@ -753,6 +878,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     $backTab = preg_replace('/[^a-z-]/', '', (string)($_POST['tab'] ?? 'dashboard'));
     redirect_to('index.php?page=admin&tab=' . ($backTab ?: 'dashboard'));
 }
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logout') {
     $type = $_POST['type'] ?? 'buyer';
     if ($type === 'admin') {
@@ -800,6 +926,7 @@ main{width:min(1220px,100%);margin:auto;padding:30px 24px 62px}.content-head{mar
 
 footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;color:#7e8998;font-size:14px}
 .payment-box{margin:16px 0;padding:14px;border:1px solid var(--line);background:#111821;border-radius:15px;text-align:center}.payment-box h3{margin:0 0 8px;font-size:15px}.payment-box p{margin:0 0 11px;color:var(--muted);font-size:11px}.payment-qr{display:block;width:min(300px,100%);aspect-ratio:1080/1045;object-fit:contain;background:#fff;border-radius:12px;padding:8px;margin:0 auto 10px}.payment-note{font-size:10px;color:#7e8998;line-height:1.5}.order-card{border:1px solid var(--line);background:var(--surface);border-radius:17px;padding:16px;margin-top:12px}.order-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.order-id{font-weight:900}.order-meta{color:var(--muted);font-size:12px;line-height:1.6;margin-top:7px}.status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.status-pending{color:#f3d28a;border:1px solid #68552b;background:rgba(243,210,138,.06)}.status-accepted{color:var(--green);border:1px solid #275f44;background:rgba(81,220,146,.06)}.status-ignored{color:var(--danger);border:1px solid #6a3542;background:rgba(255,113,136,.06)}.admin-order-actions{display:flex;gap:8px;margin-top:13px}.admin-order-actions form{flex:1}.admin-order-actions button{width:100%;border-radius:11px;padding:10px 12px;font-weight:900;border:1px solid var(--line);background:#101720;color:#e7edf4}.admin-order-actions .accept{border-color:#275f44;color:#9be8bc;background:rgba(81,220,146,.04)}.admin-order-actions .ignore{border-color:#6a3542;color:#ffb1bd;background:rgba(255,113,136,.04)}.receipt-link{display:inline-flex;margin-top:10px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:10px;padding:8px 10px;font-weight:800;font-size:11px}
+.receipt-section{margin-top:12px;padding:12px;border:1px solid var(--line);background:#0d141c;border-radius:13px}.receipt-title{color:#9ca8b8;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}.receipt-view{display:block;width:min(100%,420px);max-height:420px;object-fit:contain;background:#fff;border:1px solid #33404f;border-radius:10px}.receipt-frame{display:block;width:100%;height:480px;border:1px solid #33404f;border-radius:10px;background:#fff}.receipt-link{display:inline-flex;margin-top:9px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:10px;padding:9px 11px;font-weight:800;font-size:11px}
 .modal-backdrop{position:fixed;z-index:90;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;padding:0}.modal-backdrop.open{display:flex}.modal{width:min(650px,100%);max-height:94vh;overflow:auto;background:#0d131b;border:1px solid var(--line);border-radius:21px 21px 0 0;padding:18px 15px 25px}.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.modal-head h2{margin:4px 0;font-size:24px}.modal-muted{color:var(--muted);margin:0;font-size:13px}.close{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);color:#cbd4df;border-radius:10px;font-size:24px}
 @media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}}
 @media(max-width:700px){.site-header{height:80px}.header-inner{padding:0 16px}.brand-logo{width:40px;height:40px}.brand-title{font-size:16px}.drawer{top:80px}.menu-backdrop{inset:80px 0 0}main{padding:23px 14px 49px}.content-head{margin-bottom:18px}.content-head h1{font-size:34px}.content-head p{font-size:14px}.shop-grid{grid-template-columns:1fr;gap:14px}.product-card{border-radius:19px}.product-info{padding:16px 14px 15px}.product-name{font-size:21px}.product-price{font-size:20px}.view-btn{padding:12px;font-size:17px}.product-meta h1{font-size:30px}.product-layout{gap:8px}.product-art{margin-top:17px;border-radius:15px}.price-panel{padding:16px;border-radius:17px}.price-panel h2{font-size:24px}.price-item{padding:12px 11px}.price-right{gap:8px}.amount{font-size:14px}.buy{padding:9px 10px}.details-panel{padding:16px}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.auth-shell{padding:18px 13px;min-height:calc(100vh - 80px);align-items:center}.auth-card{padding:19px 15px;border-radius:18px}.auth-card h1{font-size:26px}.admin-panel{grid-template-columns:1fr}.drawer-inner{padding:18px 15px}}
@@ -930,7 +1057,20 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
             <?php if (!empty($o['uid'])): ?><div class="order-meta">UID / Account: <?= e($o['uid']) ?></div><?php endif; ?>
             <?php if (!empty($o['note'])): ?><div class="order-meta">Note: <?= e($o['note']) ?></div><?php endif; ?>
             <div class="order-meta">Payment: <?= e($o['payment_method']) ?><br>Receipt: <?= e($o['receipt_filename'] ?? 'Uploaded') ?></div>
-            <?php if (!empty($o['receipt']) && strpos((string)($o['receipt_mime'] ?? ''), 'image/') === 0): ?><img class="receipt-view" src="<?= e($o['receipt']) ?>" alt="Payment receipt"><?php elseif (!empty($o['receipt'])): ?><a class="receipt-link" href="<?= e($o['receipt']) ?>" target="_blank" rel="noopener">Open Receipt</a><?php endif; ?>
+            <?php $receiptUrl = $o['receipt_url'] ?? ($o['receipt'] ?? ''); ?>
+            <?php if (!empty($receiptUrl)): ?>
+              <div class="receipt-section">
+                <div class="receipt-title">PAYMENT RECEIPT</div>
+                <?php if (strpos((string)($o['receipt_mime'] ?? ''), 'image/') === 0): ?>
+                  <img class="receipt-view" src="<?= e($receiptUrl) ?>" alt="Payment receipt for <?= e($o['id']) ?>" loading="lazy">
+                <?php elseif (($o['receipt_mime'] ?? '') === 'application/pdf'): ?>
+                  <iframe class="receipt-frame" src="<?= e($receiptUrl) ?>" title="Payment receipt PDF"></iframe>
+                <?php endif; ?>
+                <a class="receipt-link" href="<?= e($receiptUrl) ?>" target="_blank" rel="noopener">🔍 View Full Receipt</a>
+              </div>
+            <?php else: ?>
+              <div class="notice">No payment receipt was attached to this order.</div>
+            <?php endif; ?>
             <div class="admin-order-actions">
               <form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form>
               <form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form>
@@ -979,7 +1119,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
     <?php elseif ($tab === 'orders'): ?>
       <section class="content-head"><div class="kicker">Orders</div><h2 style="font-size:25px;margin:8px 0 0">Pending Orders</h2></section>
-      <?php if(!$pendingOrders): ?><div class="info-box">No pending orders.</div><?php else: foreach($pendingOrders as $o): ?><article class="order-card"><div class="order-top"><div><div class="order-id"><?= e($o['id']) ?></div><div class="order-meta"><?= e($o['product']) ?><br><?= e($o['duration']) ?> • <?= e($o['amount']) ?><br>Buyer: <?= e($o['buyer_name']) ?> • <?= e($o['telegram_username']) ?></div></div><span class="status-pill status-pending">PENDING</span></div><div class="order-meta">Payment: <?= e($o['payment_method']) ?><?php if(!empty($o['uid'])):?><br>UID: <?= e($o['uid']) ?><?php endif;?></div><?php if(!empty($o['receipt']) && strpos((string)($o['receipt_mime'] ?? ''),'image/')===0): ?><img class="receipt-view" src="<?= e($o['receipt']) ?>" alt="Payment receipt"><?php elseif(!empty($o['receipt'])): ?><a class="receipt-link" href="<?= e($o['receipt']) ?>" target="_blank" rel="noopener">Open Receipt</a><?php endif; ?><div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
+      <?php if(!$pendingOrders): ?><div class="info-box">No pending orders.</div><?php else: foreach($pendingOrders as $o): ?><article class="order-card"><div class="order-top"><div><div class="order-id"><?= e($o['id']) ?></div><div class="order-meta"><?= e($o['product']) ?><br><?= e($o['duration']) ?> • <?= e($o['amount']) ?><br>Buyer: <?= e($o['buyer_name']) ?> • <?= e($o['telegram_username']) ?></div></div><span class="status-pill status-pending">PENDING</span></div><div class="order-meta">Payment: <?= e($o['payment_method']) ?><?php if(!empty($o['uid'])):?><br>UID: <?= e($o['uid']) ?><?php endif;?></div><?php $receiptUrl = $o['receipt_url'] ?? ($o['receipt'] ?? ''); ?><?php if(!empty($receiptUrl)): ?><div class="receipt-section"><div class="receipt-title">PAYMENT RECEIPT</div><?php if(strpos((string)($o['receipt_mime'] ?? ''),'image/')===0): ?><img class="receipt-view" src="<?= e($receiptUrl) ?>" alt="Payment receipt for <?= e($o['id']) ?>" loading="lazy"><?php elseif(($o['receipt_mime'] ?? '') === 'application/pdf'): ?><iframe class="receipt-frame" src="<?= e($receiptUrl) ?>" title="Payment receipt PDF"></iframe><?php endif; ?><a class="receipt-link" href="<?= e($receiptUrl) ?>" target="_blank" rel="noopener">🔍 View Full Receipt</a></div><?php else: ?><div class="notice">No payment receipt was attached to this order.</div><?php endif; ?><div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
       <section class="content-head" style="margin-top:28px"><div class="kicker">History</div><h2 style="font-size:25px;margin:8px 0 0">Order History</h2></section>
       <?php if(!$adminOrders): ?><div class="info-box">No orders have been submitted yet.</div><?php else: ?><div class="table-wrap"><table class="admin-table"><thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody><?php foreach(array_slice($adminOrders,0,50) as $o): ?><tr><td><?= e($o['id']) ?></td><td><?= e($o['buyer_name']) ?></td><td><?= e($o['product']) ?></td><td><?= e($o['amount']) ?></td><td><span class="status-pill status-<?= e($o['status']??'pending') ?>"><?= e($o['status']??'pending') ?></span></td><td><?= e(date('M d, Y g:i A',strtotime($o['created_at']??'now'))) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
 
@@ -1002,7 +1142,8 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
       </form>
     <?php endif; ?>
 
-    <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>  <?php else: ?>
+    <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
+  <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
       <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div><button class="primary">Administrator Login</button><div class="notice">Credentials come from config.php or environment variables. Defaults are admin / admin123 until changed.</div></form>
     </div></div>
