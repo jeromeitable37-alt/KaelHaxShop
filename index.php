@@ -1,42 +1,28 @@
 <?php
+require_once __DIR__ . '/includes/config.php';
 
 /*
- * Vercel production-safe session storage
+ * Vercel-safe session handling.
  *
- * PHP's default file-based sessions depend on the local server
- * filesystem. On Vercel, a later request may run on a different
- * instance, so the session can disappear.
- *
- * This handler stores the encrypted session data in a secure
- * HttpOnly cookie instead, while keeping the existing $_SESSION
- * code throughout the application unchanged.
+ * The application keeps using $_SESSION everywhere else, but the session
+ * payload is stored in an encrypted HttpOnly cookie instead of PHP's
+ * default filesystem session storage. This prevents the login/CSRF session
+ * from disappearing when Vercel serves the next request from another
+ * container instance.
  */
-
 class AppCookieSessionHandler implements SessionHandlerInterface
 {
     private string $cookieName;
     private string $encryptionKey;
 
-    public function __construct(
-        string $secret,
-        string $cookieName = 'KAELHAX_SESSION'
-    ) {
+    public function __construct(string $secret, string $cookieName = 'KAELHAX_SESSION')
+    {
         $this->cookieName = $cookieName;
-
-        /*
-         * Derive a fixed 32-byte key from APP_SESSION_SECRET.
-         */
-        $this->encryptionKey = hash(
-            'sha256',
-            $secret,
-            true
-        );
+        $this->encryptionKey = hash('sha256', $secret, true);
     }
 
-    public function open(
-        string $path,
-        string $name
-    ): bool {
+    public function open(string $path, string $name): bool
+    {
         return true;
     }
 
@@ -48,21 +34,12 @@ class AppCookieSessionHandler implements SessionHandlerInterface
     public function read(string $id): string
     {
         $cookie = $_COOKIE[$this->cookieName] ?? '';
-
         if ($cookie === '') {
             return '';
         }
 
         $raw = self::base64UrlDecode($cookie);
-
-        /*
-         * IV = 12 bytes
-         * TAG = 16 bytes
-         */
-        if (
-            $raw === false ||
-            strlen($raw) < 28
-        ) {
+        if ($raw === false || strlen($raw) < 28) {
             return '';
         }
 
@@ -83,62 +60,31 @@ class AppCookieSessionHandler implements SessionHandlerInterface
             return '';
         }
 
-        $payload = json_decode(
-            $plaintext,
-            true
-        );
-
-        if (!is_array($payload)) {
+        $payload = json_decode($plaintext, true);
+        if (!is_array($payload) || ($payload['version'] ?? 0) !== 1) {
             return '';
         }
 
-        if (($payload['version'] ?? 0) !== 1) {
+        if ((int)($payload['expires'] ?? 0) < time()) {
             return '';
         }
 
-        /*
-         * Expire sessions after 7 days.
-         */
-        if (
-            (int)($payload['expires'] ?? 0) < time()
-        ) {
-            return '';
-        }
-
-        $sessionData = self::base64UrlDecode(
-            (string)($payload['data'] ?? '')
-        );
-
-        if ($sessionData === false) {
-            return '';
-        }
-
-        return $sessionData;
+        $sessionData = self::base64UrlDecode((string)($payload['data'] ?? ''));
+        return $sessionData === false ? '' : $sessionData;
     }
 
-    public function write(
-        string $id,
-        string $data
-    ): bool {
-
-        $payload = json_encode(
-            [
-                'version' => 1,
-                'expires' =>
-                    time() + (60 * 60 * 24 * 7),
-                'data' =>
-                    self::base64UrlEncode($data),
-            ],
-            JSON_UNESCAPED_SLASHES
-        );
+    public function write(string $id, string $data): bool
+    {
+        $payload = json_encode([
+            'version' => 1,
+            'expires' => time() + (60 * 60 * 24 * 7),
+            'data' => self::base64UrlEncode($data),
+        ], JSON_UNESCAPED_SLASHES);
 
         if ($payload === false) {
             return false;
         }
 
-        /*
-         * AES-256-GCM provides encryption + integrity.
-         */
         $iv = random_bytes(12);
         $tag = '';
 
@@ -155,45 +101,31 @@ class AppCookieSessionHandler implements SessionHandlerInterface
             return false;
         }
 
-        $cookieValue = self::base64UrlEncode(
-            $iv . $tag . $ciphertext
-        );
+        $cookieValue = self::base64UrlEncode($iv . $tag . $ciphertext);
+        $secure = (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
-        return setcookie(
-            $this->cookieName,
-            $cookieValue,
-            [
-                'expires' =>
-                    time() + (60 * 60 * 24 * 7),
-                'path' => '/',
-                'secure' =>
-                    (
-                        !empty($_SERVER['HTTPS']) &&
-                        $_SERVER['HTTPS'] !== 'off'
-                    ),
-                'httponly' => true,
-                'samesite' => 'Lax',
-            ]
-        );
+        return setcookie($this->cookieName, $cookieValue, [
+            'expires' => time() + (60 * 60 * 24 * 7),
+            'path' => '/',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
     }
 
     public function destroy(string $id): bool
     {
-        return setcookie(
-            $this->cookieName,
-            '',
-            [
-                'expires' => time() - 3600,
-                'path' => '/',
-                'secure' =>
-                    (
-                        !empty($_SERVER['HTTPS']) &&
-                        $_SERVER['HTTPS'] !== 'off'
-                    ),
-                'httponly' => true,
-                'samesite' => 'Lax',
-            ]
-        );
+        $secure = (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+        return setcookie($this->cookieName, '', [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
     }
 
     public function gc(int $max_lifetime): int|false
@@ -201,101 +133,34 @@ class AppCookieSessionHandler implements SessionHandlerInterface
         return 0;
     }
 
-    private static function base64UrlEncode(
-        string $value
-    ): string {
-        return rtrim(
-            strtr(
-                base64_encode($value),
-                '+/',
-                '-_'
-            ),
-            '='
-        );
+    private static function base64UrlEncode(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 
-    private static function base64UrlDecode(
-        string $value
-    ): string|false {
-
-        $padding =
-            strlen($value) % 4;
-
+    private static function base64UrlDecode(string $value): string|false
+    {
+        $padding = strlen($value) % 4;
         if ($padding !== 0) {
-            $value .= str_repeat(
-                '=',
-                4 - $padding
-            );
+            $value .= str_repeat('=', 4 - $padding);
         }
 
-        return base64_decode(
-            strtr(
-                $value,
-                '-_',
-                '+/'
-            ),
-            true
-        );
+        return base64_decode(strtr($value, '-_', '+/'), true);
     }
 }
 
-
-/*
- * APP_SESSION_SECRET MUST be configured in Vercel.
- */
-$appSessionSecret =
-    getenv('APP_SESSION_SECRET') ?: '';
-
+$appSessionSecret = getenv('APP_SESSION_SECRET') ?: '';
 if ($appSessionSecret === '') {
-
-    /*
-     * Local development fallback only.
-     * Production should always provide APP_SESSION_SECRET.
-     */
-    $appSessionSecret =
-        'local-development-session-secret-change-me';
+    $appSessionSecret = 'local-development-session-secret-change-me';
 }
 
+ini_set('session.use_cookies', '0');
+ini_set('session.use_trans_sid', '0');
+ini_set('session.use_strict_mode', '0');
 
-/*
- * Disable PHP's normal filesystem-backed
- * session cookie. Our custom encrypted cookie
- * is used instead.
- */
-ini_set(
-    'session.use_cookies',
-    '0'
-);
-
-ini_set(
-    'session.use_trans_sid',
-    '0'
-);
-
-ini_set(
-    'session.use_strict_mode',
-    '0'
-);
-
-
-/*
- * Register custom session handler BEFORE
- * session_start().
- */
-$appSessionHandler =
-    new AppCookieSessionHandler(
-        $appSessionSecret
-    );
-
-session_set_save_handler(
-    $appSessionHandler,
-    true
-);
-
+$appSessionHandler = new AppCookieSessionHandler($appSessionSecret);
+session_set_save_handler($appSessionHandler, true);
 session_start();
-
-
-require_once __DIR__ . '/includes/config.php';
 
 /*
  * Optional config.php constants supported:
@@ -1218,6 +1083,16 @@ function menu_item($href, $label, $icon, $pageKey) {
     global $page;
     $active = ($page === $pageKey) ? ' active' : '';
     return '<a class="menu-link' . $active . '" href="' . e($href) . '"><span class="menu-icon">' . $icon . '</span><span>' . e($label) . '</span></a>';
+}
+
+/*
+ * Persist the current session BEFORE any HTML is emitted.
+ * This is critical for the custom cookie session handler because
+ * setcookie() cannot modify response headers after output begins.
+ */
+csrf_token();
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
 }
 ?>
 <!doctype html>
