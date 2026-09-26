@@ -2886,7 +2886,7 @@ function initEnhancedChat() {
       if (pill && chatIsNearBottom(thread)) pill.hidden = true;
     });
 
-    const pill = form.closest('.chat-shell')?.querySelector('.chat-new-message');
+    const pill = form.closest('.chat-shell, .chat-admin-thread')?.querySelector('.chat-new-message');
     if (pill) {
       pill.addEventListener('click', () => {
         pill.hidden = true;
