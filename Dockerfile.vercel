@@ -1,0 +1,9 @@
+FROM dunglas/frankenphp:php8.4
+
+WORKDIR /app
+
+COPY . /app
+
+ENV SERVER_NAME=:${PORT}
+
+CMD ["frankenphp", "php-server", "--root", "/app", "--listen", ":80"]
