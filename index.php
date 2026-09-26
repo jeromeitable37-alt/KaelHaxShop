@@ -425,62 +425,104 @@ function cloudinary_configured() {
 }
 
 function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
+
     if (!cloudinary_configured()) {
-        return [false, 'Cloudinary is not configured. Please set CLOUDINARY_URL.'];
+        return [
+            false,
+            'Cloudinary is not configured. Please check CLOUDINARY_URL.'
+        ];
     }
 
     if (!file_exists($tmpPath) || !is_readable($tmpPath)) {
-        return [false, 'The uploaded receipt could not be read.'];
+        return [
+            false,
+            'The uploaded receipt could not be read.'
+        ];
     }
 
     $config = cloudinary_config();
-    $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId);
-    $publicId = 'payment-receipts/' . $safeOrderId . '_' . bin2hex(random_bytes(6));
-    $timestamp = time();
+
+    $safeOrderId = preg_replace(
+        '/[^A-Za-z0-9_-]/',
+        '',
+        $orderId
+    );
+
+    $publicId =
+        'payment-receipts/' .
+        $safeOrderId .
+        '_' .
+        bin2hex(random_bytes(6));
 
     /*
-     * Cloudinary signed Upload API request.
-     * The upload endpoint expects signed request parameters rather than
-     * HTTP Basic authentication.
+     * Payment receipts are treated as images.
+     * Cloudinary Upload API endpoint:
+     *
+     * /image/upload
      */
-    $signingParams = [
-        'public_id' => $publicId,
-        'timestamp' => $timestamp,
-    ];
-
-    ksort($signingParams);
-    $signatureBase = http_build_query($signingParams, '', '&', PHP_QUERY_RFC3986);
-    $signature = sha1($signatureBase . $config['api_secret']);
-
     $endpoint =
         'https://api.cloudinary.com/v1_1/' .
         rawurlencode($config['cloud_name']) .
-        '/auto/upload';
+        '/image/upload';
 
     $fields = [
-        'file' => new CURLFile($tmpPath, $mime, basename($originalName)),
+        'file' => new CURLFile(
+            $tmpPath,
+            $mime,
+            basename($originalName)
+        ),
+
         'public_id' => $publicId,
-        'timestamp' => $timestamp,
-        'api_key' => $config['api_key'],
-        'signature' => $signature,
+
+        'type' => 'upload'
     ];
 
     $ch = curl_init($endpoint);
 
     curl_setopt_array($ch, [
+
         CURLOPT_POST => true,
+
         CURLOPT_RETURNTRANSFER => true,
+
         CURLOPT_TIMEOUT => 30,
-        CURLOPT_POSTFIELDS => $fields,
+
+        /*
+         * Cloudinary backend authentication.
+         *
+         * API key + API secret are sent through HTTP Basic Auth.
+         * No signature calculation is required.
+         */
+        CURLOPT_USERPWD =>
+            $config['api_key'] .
+            ':' .
+            $config['api_secret'],
+
+        CURLOPT_HTTPAUTH =>
+            CURLAUTH_BASIC,
+
+        CURLOPT_POSTFIELDS =>
+            $fields,
+
     ]);
 
     $response = curl_exec($ch);
+
     $curlError = curl_error($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    $httpCode =
+        curl_getinfo(
+            $ch,
+            CURLINFO_HTTP_CODE
+        );
 
     curl_close($ch);
 
-    if ($response === false || $curlError !== '') {
+    if (
+        $response === false ||
+        $curlError !== ''
+    ) {
+
         return [
             false,
             'Cloudinary connection failed: ' .
@@ -488,25 +530,67 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         ];
     }
 
-    $data = json_decode($response, true);
+    $data =
+        json_decode(
+            $response,
+            true
+        );
 
-    if ($httpCode < 200 || $httpCode >= 300 || empty($data['secure_url'])) {
+    if (
+        $httpCode < 200 ||
+        $httpCode >= 300
+    ) {
+
         $message =
-            $data['error']['message'] ??
-            'Cloudinary rejected the receipt upload.';
+            $data['error']['message']
+            ?? 'Cloudinary rejected the receipt upload.';
 
-        return [false, 'Cloudinary upload failed: ' . $message];
+        return [
+            false,
+            'Cloudinary upload failed: ' .
+            $message
+        ];
     }
 
-    return [true, [
-        'url' => $data['secure_url'],
-        'public_id' => $data['public_id'] ?? $publicId,
-        'asset_id' => $data['asset_id'] ?? '',
-        'resource_type' => $data['resource_type'] ?? 'image',
-        'format' => $data['format'] ?? '',
-        'mime' => $mime,
-        'filename' => basename($originalName),
-    ]];
+    if (
+        empty($data['secure_url'])
+    ) {
+
+        return [
+            false,
+            'Cloudinary uploaded the receipt but did not return a secure URL.'
+        ];
+    }
+
+    return [
+        true,
+        [
+            'url' =>
+                $data['secure_url'],
+
+            'public_id' =>
+                $data['public_id']
+                ?? $publicId,
+
+            'asset_id' =>
+                $data['asset_id']
+                ?? '',
+
+            'resource_type' =>
+                $data['resource_type']
+                ?? 'image',
+
+            'format' =>
+                $data['format']
+                ?? '',
+
+            'mime' =>
+                $mime,
+
+            'filename' =>
+                basename($originalName),
+        ]
+    ];
 }
 function save_receipt_upload($file, $orderId) {
     if (!isset($file) || !is_array($file)) {
