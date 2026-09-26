@@ -2527,7 +2527,7 @@ function chatEscape(value) {
 
 function chatLinkify(value) {
   let safe = chatEscape(value);
-  return safe.replace(/(https?:\\/\\/[^\\s<]+)/gi, '<a class="chat-inline-link" href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  return safe.replace(/(https?:\/\/[^\s<]+)/gi, '<a class="chat-inline-link" href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
 function chatFormatTime(value) {
@@ -2989,6 +2989,7 @@ function openOrder(slug,tierIndex){
 }
 function switchAuth(mode){const login=document.getElementById('loginForm'),reg=document.getElementById('registerForm'),tLogin=document.getElementById('tabLogin'),tReg=document.getElementById('tabRegister'); if(!login||!reg)return; if(tLogin)tLogin.classList.toggle('active',mode==='login'); if(tReg)tReg.classList.toggle('active',mode==='register'); login.style.display=mode==='login'?'block':'none'; reg.style.display=mode==='register'?'block':'none'}
 document.getElementById('modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
+initEnhancedChat();
 initAdminOrderNotifications();
 
 if (isAdminPortal) {
