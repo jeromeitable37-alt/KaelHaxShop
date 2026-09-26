@@ -368,34 +368,42 @@ function telegram_send_order($caption) {
 
 function telegram_send_receipt($order, $receiptAbsolutePath, $mime) {
     if (!telegram_configured()) return [false, 'Telegram is not configured yet.'];
-    if (!file_exists($receiptAbsolutePath) || !is_readable($receiptAbsolutePath)) return [false, 'Receipt file is not readable.'];
+    if (!file_exists($receiptAbsolutePath) || !is_readable($receiptAbsolutePath)) {
+        return [false, 'Receipt file is not readable.'];
+    }
 
     $caption = '<b>🧾 PAYMENT RECEIPT</b>' . "\n\n" .
-        '<b>Order ID:</b> <code>' . e($order['id']) . '</code>' . "\n" .
-        '<b>Buyer:</b> ' . e($order['buyer_name']) . "\n" .
-        '<b>Product:</b> ' . e($order['product']) . "\n" .
-        '<b>Amount:</b> ' . e($order['amount']) . "\n" .
-        '<b>Payment:</b> ' . e($order['payment_method']) . "\n" .
-        "\n" . '<b>Status:</b> PENDING ADMIN REVIEW';
+        '<b>Order ID:</b> <code>' . e($order['id'] ?? '') . '</code>' . "\n" .
+        '<b>Buyer:</b> ' . e($order['buyer_name'] ?? '') . "\n" .
+        '<b>Product:</b> ' . e($order['product'] ?? '') . "\n" .
+        '<b>Amount:</b> ' . e($order['amount'] ?? '') . "\n" .
+        '<b>Payment:</b> ' . e($order['payment_method'] ?? '') . "\n" .
+        "\n" . '<b>Status:</b> ACCEPTED BY ADMIN';
 
-    if (strpos($mime, 'image/') === 0) {
-        $fields = [
-            'chat_id' => TELEGRAM_CHAT_ID,
-            'photo' => new CURLFile($receiptAbsolutePath, $mime, basename($receiptAbsolutePath)),
-            'caption' => $caption,
-            'parse_mode' => 'HTML',
-        ];
-        [$ok, $result] = telegram_request('sendPhoto', $fields, true);
-    } else {
-        $fields = [
-            'chat_id' => TELEGRAM_CHAT_ID,
-            'document' => new CURLFile($receiptAbsolutePath, $mime, basename($receiptAbsolutePath)),
-            'caption' => $caption,
-            'parse_mode' => 'HTML',
-        ];
-        [$ok, $result] = telegram_request('sendDocument', $fields, true);
+    /*
+     * Send the receipt as a Telegram DOCUMENT instead of a PHOTO.
+     * This keeps JPG/PNG/WEBP/PDF receipts together with the approved
+     * order banner and avoids photo-format restrictions.
+     */
+    $safeMime = (is_string($mime) && $mime !== '') ? $mime : 'application/octet-stream';
+    $fields = [
+        'chat_id' => TELEGRAM_CHAT_ID,
+        'document' => new CURLFile(
+            $receiptAbsolutePath,
+            $safeMime,
+            basename($receiptAbsolutePath)
+        ),
+        'caption' => $caption,
+        'parse_mode' => 'HTML',
+    ];
+
+    [$ok, $result] = telegram_request('sendDocument', $fields, true);
+
+    if (!$ok) {
+        return [false, is_string($result) ? $result : 'Telegram rejected the receipt upload.'];
     }
-    return [$ok, $ok ? 'OK' : (is_string($result) ? $result : 'Telegram rejected the receipt.')];
+
+    return [true, 'OK'];
 }
 
 // -------------------- POST ACTIONS --------------------
