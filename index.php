@@ -1277,11 +1277,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'admin_o
 
 // -------------------- REAL-TIME CHAT POLLING ENDPOINT --------------------
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'chat_poll') {
-    if (!is_user() && !is_admin()) {
+    $requestedRole = ($_GET['role'] ?? '') === 'admin' ? 'admin' : 'buyer';
+
+    if ($requestedRole === 'admin') {
+        if (!is_admin()) {
+            chat_json_response(['ok' => false, 'error' => 'Unauthorized.'], 401);
+        }
+    } elseif (!is_user()) {
         chat_json_response(['ok' => false, 'error' => 'Unauthorized.'], 401);
     }
 
-    $role = is_admin() ? 'admin' : 'buyer';
+    $role = $requestedRole;
     $selectedUser = '';
 
     if ($role === 'admin') {
@@ -1323,8 +1329,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_message') {
     $isAjaxChat = ($_POST['ajax'] ?? '') === '1';
+    $chatRole = ($_POST['chat_role'] ?? '') === 'admin' ? 'admin' : 'buyer';
 
-    if (!is_user() && !is_admin()) {
+    if ($chatRole === 'admin' && !is_admin()) {
+        if ($isAjaxChat) chat_json_response(['ok' => false, 'error' => 'Administrator session required.'], 401);
+        redirect_page('admin');
+    }
+
+    if ($chatRole === 'buyer' && !is_user()) {
         if ($isAjaxChat) chat_json_response(['ok' => false, 'error' => 'Please log in again.'], 401);
         redirect_page('account');
     }
@@ -1338,7 +1350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
         redirect_page(is_admin() ? 'admin' : 'messages');
     }
 
-    if (is_admin()) {
+    if ($chatRole === 'admin') {
         $username = chat_identity($_POST['username'] ?? '');
         $back = 'index.php?page=admin&tab=messages&user=' . rawurlencode($username);
         if ($username === '') {
@@ -1386,13 +1398,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chat_mark_read') {
-    if (!is_user() && !is_admin()) {
+    $chatRole = ($_POST['chat_role'] ?? '') === 'admin' ? 'admin' : 'buyer';
+
+    if ($chatRole === 'admin' && !is_admin()) {
+        chat_json_response(['ok' => false, 'error' => 'Administrator session required.'], 401);
+    }
+
+    if ($chatRole === 'buyer' && !is_user()) {
         chat_json_response(['ok' => false, 'error' => 'Please log in again.'], 401);
     }
 
     $isAjaxChat = ($_POST['ajax'] ?? '') === '1';
 
-    if (is_admin()) {
+    if ($chatRole === 'admin') {
         $username = chat_identity($_POST['username'] ?? '');
         if ($username === '') {
             if ($isAjaxChat) chat_json_response(['ok' => false, 'error' => 'Conversation not found.'], 422);
@@ -1414,7 +1432,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chat_
         ]);
     }
 
-    redirect_to(is_admin()
+    redirect_to($chatRole === 'admin'
         ? 'index.php?page=admin&tab=messages&user=' . rawurlencode($username)
         : 'index.php?page=messages'
     );
@@ -1968,6 +1986,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <div class="chat-new-message" id="buyerChatNewMessage" hidden>↓ New message</div>
     <form method="post" class="chat-compose chat-modern-compose" id="buyerChatForm">
       <input type="hidden" name="action" value="send_message">
+      <input type="hidden" name="chat_role" value="buyer">
       <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
       <div class="chat-compose-top">
         <button class="chat-emoji-btn" type="button" data-emoji-button="buyerChatForm" aria-label="Add emoji">😊</button>
@@ -2231,6 +2250,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
             <div class="chat-new-message" id="adminChatNewMessage" hidden>↓ New message</div>
             <form method="post" class="chat-compose chat-modern-compose" id="adminChatForm">
               <input type="hidden" name="action" value="send_message">
+              <input type="hidden" name="chat_role" value="admin">
               <input type="hidden" name="username" value="<?= e($selectedChatUser) ?>">
               <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
               <div class="chat-compose-top">
@@ -2883,11 +2903,16 @@ function chatRenderInbox(conversations, selectedUser) {
 }
 
 async function chatMarkRead(username) {
-  if (!username) return;
+  const effectiveUsername = username || <?= json_encode(is_user() ? ($_SESSION['buyer_username'] ?? '') : '') ?>;
+  const role = isAdminPortal ? 'admin' : 'buyer';
+
+  if (role === 'admin' && !effectiveUsername) return;
+  if (role === 'buyer' && !effectiveUsername) return;
 
   const formData = new FormData();
   formData.set('action', 'chat_mark_read');
-  formData.set('username', username);
+  formData.set('chat_role', role);
+  formData.set('username', effectiveUsername);
   formData.set('ajax', '1');
   formData.set('csrf', <?= json_encode(csrf_token()) ?>);
 
@@ -2960,6 +2985,7 @@ async function chatSubmitForm(form) {
 
   const data = new FormData(form);
   data.set('ajax', '1');
+  data.set('chat_role', form.id === 'adminChatForm' ? 'admin' : 'buyer');
 
   try {
     chatUnlockSound();
@@ -3037,6 +3063,7 @@ async function chatPollOnce() {
   try {
     const url = new URL('/index.php', window.location.origin);
     url.searchParams.set('action', 'chat_poll');
+    url.searchParams.set('role', isAdmin ? 'admin' : 'buyer');
 
     if (selectedUser) {
       url.searchParams.set('user', selectedUser);
