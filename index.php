@@ -16,7 +16,7 @@ if (!defined('TELEGRAM_CHAT_ID')) define('TELEGRAM_CHAT_ID', getenv('TELEGRAM_CH
 if (!defined('TELEGRAM_CHANNEL_USERNAME')) define('TELEGRAM_CHANNEL_USERNAME', getenv('TELEGRAM_CHANNEL_USERNAME') ?: '');
 if (!defined('ADMIN_USERNAME')) define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
 if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: 'admin123');
-if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kael-hax-shop.vercel.app');
+if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kielhax.elementfx.com');
 
 $defaultProducts = [
     'injector' => [
@@ -247,8 +247,7 @@ function save_receipt_upload($file, $orderId) {
 
     $allowed = [
         'image/jpeg' => 'jpg',
-        'image/jpg' => 'jpg',
-        'image/pjpeg' => 'jpg',
+        'image/jpg' => 'jpg',        'image/pjpeg' => 'jpg',
         'image/png' => 'png',
         'image/webp' => 'webp',
         'application/pdf' => 'pdf',
@@ -471,15 +470,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
         "\n" . '<b>Status:</b> PENDING PAYMENT REVIEW' . "\n" .
         '<b>SHOP:</b> ' . e(SHOP_URL);
 
-    [$orderSent, $orderMsg] = telegram_send_order($caption);
-    $receiptPath = __DIR__ . '/' . $receipt['path'];
-    [$receiptSent, $receiptMsg] = telegram_send_receipt($order, $receiptPath, $receipt['mime']);
-
-    if (!$orderSent || !$receiptSent) {
-        $_SESSION['flash'] = ['type' => 'error', 'msg' => 'Order was saved, but Telegram delivery needs attention. ' . (!$orderSent ? $orderMsg : $receiptMsg)];
-    } else {
-        $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Order ' . $orderId . ' submitted. Receipt sent for admin review.'];
-    }
+    // Do not notify Telegram yet. The banner + receipt will only be sent
+    // after an administrator accepts this order.
+    $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Order ' . $orderId . ' submitted and is waiting for admin review.'];
     redirect_page('my-orders');
 }
 
@@ -504,7 +497,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
     $_SESSION['flash'] = ['type' => $ok ? 'success' : 'error', 'msg' => $ok ? 'Concern sent to Telegram successfully.' : ($msg ?: 'Unable to send concern.')];
     redirect_page('concerns');
 }
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer_register') {
     if (empty($siteSettings['registration_enabled'])) { $_SESSION['flash']=['type'=>'error','msg'=>'Buyer registration is currently disabled.']; redirect_page('account'); }
     $username = strtolower(trim($_POST['username'] ?? ''));
@@ -683,26 +675,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     $status = ($_POST['status'] ?? '') === 'accepted' ? 'accepted' : (($_POST['status'] ?? '') === 'ignored' ? 'ignored' : 'pending');
     $orders = load_orders();
     $found = false;
+    $approvedOrder = null;
+    $wasAlreadyTelegramSent = false;
     foreach ($orders as &$order) {
         if (($order['id'] ?? '') === $orderId) {
+            $wasAlreadyTelegramSent = !empty($order['telegram_accepted_sent_at']);
             $order['status'] = $status;
             $order['reviewed_at'] = date('c');
             $order['reviewed_by'] = $_SESSION['admin_username'] ?? 'admin';
+            if ($status === 'accepted') {
+                $approvedOrder = $order;
+            }
             $found = true;
             break;
         }
     }
     unset($order);
     if ($found) {
+        $telegramResult = null;
+
+        // Only after admin approval: send the order banner first, then the receipt.
+        // Ignored/pending orders never send the banner or receipt to Telegram.
+        if ($status === 'accepted' && is_array($approvedOrder) && !$wasAlreadyTelegramSent) {
+            $approvedCaption =
+                '<b>✅ APPROVED ORDER</b>' . "\n\n" .
+                '<b>Order ID:</b> <code>' . e($approvedOrder['id'] ?? $orderId) . '</code>' . "\n" .
+                '<b>User:</b> <code>' . e($approvedOrder['telegram_username'] ?? '') . '</code>' . "\n" .
+                '<b>Name:</b> ' . e($approvedOrder['buyer_name'] ?? '') . "\n" .
+                '<b>Product:</b> ' . e($approvedOrder['product'] ?? '') . "\n" .
+                '<b>Duration:</b> ' . e($approvedOrder['duration'] ?? '') . "\n" .
+                '<b>Amount:</b> ' . e($approvedOrder['amount'] ?? '') . "\n" .
+                '<b>Payment Method:</b> ' . e($approvedOrder['payment_method'] ?? '—') . "\n" .
+                (!empty($approvedOrder['uid']) ? '<b>UID:</b> ' . e($approvedOrder['uid']) . "\n" : '') .
+                (!empty($approvedOrder['note']) ? "\n" . '<b>Note:</b> ' . e($approvedOrder['note']) . "\n" : '') .
+                "\n" . '<b>Status:</b> ACCEPTED BY ADMIN' . "\n" .
+                '<b>SHOP:</b> ' . e(SHOP_URL);
+
+            [$bannerSent, $bannerMsg] = telegram_send_order($approvedCaption);
+            $receiptAbsolutePath = __DIR__ . '/' . ($approvedOrder['receipt'] ?? '');
+            [$receiptSent, $receiptMsg] = telegram_send_receipt($approvedOrder, $receiptAbsolutePath, $approvedOrder['receipt_mime'] ?? '');
+
+            if ($bannerSent && $receiptSent) {
+                foreach ($orders as &$savedOrder) {
+                    if (($savedOrder['id'] ?? '') === $orderId) {
+                        $savedOrder['telegram_accepted_sent_at'] = date('c');
+                        break;
+                    }
+                }
+                unset($savedOrder);
+                $telegramResult = [true, 'Approved order banner and receipt sent to Telegram.'];
+            } else {
+                $telegramResult = [false, 'Order accepted, but Telegram delivery failed. ' . (!$bannerSent ? $bannerMsg : $receiptMsg)];
+            }
+        }
+
         save_orders($orders);
-        $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' marked as ' . strtoupper($status) . '.'];
+        if ($telegramResult && !$telegramResult[0]) {
+            $_SESSION['flash'] = ['type'=>'error','msg'=>'Order ' . $orderId . ' marked as ACCEPTED. ' . $telegramResult[1]];
+        } elseif ($status === 'accepted' && $wasAlreadyTelegramSent) {
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' is already accepted and has already been sent to Telegram.'];
+        } elseif ($status === 'accepted') {
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' accepted. Banner and receipt sent to Telegram.'];
+        } else {
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' marked as ' . strtoupper($status) . '.'];
+        }
     } else {
         $_SESSION['flash'] = ['type'=>'error','msg'=>'Order not found.'];
     }
     $backTab = preg_replace('/[^a-z-]/', '', (string)($_POST['tab'] ?? 'dashboard'));
     redirect_to('index.php?page=admin&tab=' . ($backTab ?: 'dashboard'));
 }
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logout') {
     $type = $_POST['type'] ?? 'buyer';
     if ($type === 'admin') {
@@ -952,8 +994,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
       </form>
     <?php endif; ?>
 
-    <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
-  <?php else: ?>
+    <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>  <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
       <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div><button class="primary">Administrator Login</button><div class="notice">Credentials come from config.php or environment variables. Defaults are admin / admin123 until changed.</div></form>
     </div></div>
