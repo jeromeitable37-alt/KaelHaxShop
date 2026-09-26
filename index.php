@@ -179,21 +179,20 @@ if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD'
 if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kael-hax-shop.vercel.app');
 
 $defaultProducts = [
-    'injector' => [
-        'slug' => 'injector',
-        'category' => 'CODM',
-        'name' => 'KAELHAX INJECTOR | CODMGR',
+    'digital-package' => [
+        'slug' => 'digital-package',
+        'category' => 'Digital Products',
+        'name' => 'Digital Package',
         'image' => 'assets/injector.jpg',
         'promo' => false,
-        'details_title' => '👌 INFO DETAILS 👌',
+        'details_title' => 'INFO DETAILS',
         'details' => [
-            '3-7 Days Ban Only',
-            'Strong Bypass',
-            'Compatible to Low-End',
-            'Unlock All Skins',
-            'Can Play Brutal'
+            'Digital delivery',
+            'Manual order review',
+            'Receipt required',
+            'Buyer support available',
         ],
-        'price_title' => 'OFFICIAL PRICELIST',
+        'price_title' => 'PRICELIST',
         'tiers' => [
             ['7 Days Access', 100, null],
             ['15 Days Access', 150, null],
@@ -201,20 +200,19 @@ $defaultProducts = [
             ['Lifetime Access', 250, null],
         ],
     ],
-    'codmgr-vip' => [
-        'slug' => 'codmgr-vip',
-        'category' => 'CODM',
-        'name' => 'KAELHAX VIP ACCESS | CODMGR',
+    'premium-package' => [
+        'slug' => 'premium-package',
+        'category' => 'Digital Products',
+        'name' => 'Premium Digital Package',
         'image' => 'assets/codmgr-mod.jpg',
         'promo' => true,
-        'features' => ['LOADER', 'MOD'],
-        'details_title' => '👌 FULL DETAILS 👌',
+        'features' => ['Premium', 'Priority Support'],
+        'details_title' => 'FULL DETAILS',
         'details' => [
-            '3-7 Days Ban Only',
-            'No Auto Ban',
-            'Strong Bypass',
-            'Unlock All Skins & Mythic Attachments',
-            'Easy LB this season'
+            'Manual order review',
+            'Receipt required',
+            'Premium support',
+            'Digital delivery',
         ],
         'price_title' => 'PRICELIST PROMO',
         'tiers' => [
@@ -615,22 +613,57 @@ function receipt_upload_error_message($code) {
     return $map[$code] ?? 'Unable to upload the receipt.';
 }
 function cloudinary_config() {
-    $cloudinaryUrl = getenv('CLOUDINARY_URL') ?: '';
+    /*
+     * Preferred Production configuration:
+     *   CLOUDINARY_CLOUD_NAME
+     *   CLOUDINARY_API_KEY
+     *   CLOUDINARY_API_SECRET
+     *
+     * CLOUDINARY_URL remains supported as an all-or-nothing fallback.
+     * We never mix values from the two credential sources because that can
+     * create credential mismatches.
+     */
+    $cloudName = trim((string)(getenv('CLOUDINARY_CLOUD_NAME') ?: ''));
+    $apiKey = trim((string)(getenv('CLOUDINARY_API_KEY') ?: ''));
+    $apiSecret = trim((string)(getenv('CLOUDINARY_API_SECRET') ?: ''));
 
-    if ($cloudinaryUrl === '') {
+    if ($cloudName !== '' && $apiKey !== '' && $apiSecret !== '') {
         return [
-            'cloud_name' => '',
-            'api_key' => '',
-            'api_secret' => '',
+            'cloud_name' => $cloudName,
+            'api_key' => $apiKey,
+            'api_secret' => $apiSecret,
         ];
     }
 
-    $parts = parse_url($cloudinaryUrl);
+    /* Use CLOUDINARY_URL only when the three separate variables are not complete. */
+    $cloudinaryUrl = trim((string)(getenv('CLOUDINARY_URL') ?: ''));
+
+    if ($cloudinaryUrl !== '') {
+        $parts = parse_url($cloudinaryUrl);
+
+        if (is_array($parts)) {
+            $fallbackCloudName = trim((string)($parts['host'] ?? ''));
+            $fallbackApiKey = isset($parts['user'])
+                ? trim(urldecode((string)$parts['user']))
+                : '';
+            $fallbackApiSecret = isset($parts['pass'])
+                ? trim(urldecode((string)$parts['pass']))
+                : '';
+
+            if ($fallbackCloudName !== '' && $fallbackApiKey !== '' && $fallbackApiSecret !== '') {
+                return [
+                    'cloud_name' => $fallbackCloudName,
+                    'api_key' => $fallbackApiKey,
+                    'api_secret' => $fallbackApiSecret,
+                ];
+            }
+        }
+    }
 
     return [
-        'cloud_name' => (string)($parts['host'] ?? ''),
-        'api_key' => isset($parts['user']) ? urldecode((string)$parts['user']) : '',
-        'api_secret' => isset($parts['pass']) ? urldecode((string)$parts['pass']) : '',
+        'cloud_name' => '',
+        'api_key' => '',
+        'api_secret' => '',
     ];
 }
 
@@ -644,7 +677,10 @@ function cloudinary_configured() {
 
 function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     if (!cloudinary_configured()) {
-        return [false, 'Cloudinary is not configured. Please set CLOUDINARY_URL.'];
+        return [
+            false,
+            'Cloudinary is not configured. Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET, or CLOUDINARY_URL.'
+        ];
     }
 
     if (!file_exists($tmpPath) || !is_readable($tmpPath)) {
@@ -652,35 +688,35 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
     }
 
     $config = cloudinary_config();
-    $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId);
-    $publicId = 'payment-receipts/' . $safeOrderId . '_' . bin2hex(random_bytes(6));
-    $timestamp = time();
+
+    $safeOrderId = preg_replace(
+        '/[^A-Za-z0-9_-]/',
+        '',
+        (string)$orderId
+    );
+
+    $publicId =
+        'payment-receipts/' .
+        $safeOrderId . '_' .
+        bin2hex(random_bytes(6));
 
     /*
-     * Cloudinary signed Upload API request.
-     * The upload endpoint expects signed request parameters rather than
-     * HTTP Basic authentication.
+     * Backend authenticated upload using HTTP Basic Authentication.
+     * No signature or timestamp is generated in this flow.
      */
-    $signingParams = [
-        'public_id' => $publicId,
-        'timestamp' => $timestamp,
-    ];
-
-    ksort($signingParams);
-    $signatureBase = http_build_query($signingParams, '', '&', PHP_QUERY_RFC3986);
-    $signature = sha1($signatureBase . $config['api_secret']);
-
     $endpoint =
         'https://api.cloudinary.com/v1_1/' .
         rawurlencode($config['cloud_name']) .
         '/auto/upload';
 
     $fields = [
-        'file' => new CURLFile($tmpPath, $mime, basename($originalName)),
+        'file' => new CURLFile(
+            $tmpPath,
+            $mime,
+            basename($originalName)
+        ),
         'public_id' => $publicId,
-        'timestamp' => $timestamp,
-        'api_key' => $config['api_key'],
-        'signature' => $signature,
+        'type' => 'upload',
     ];
 
     $ch = curl_init($endpoint);
@@ -689,6 +725,8 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 30,
+        CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
+        CURLOPT_USERPWD => $config['api_key'] . ':' . $config['api_secret'],
         CURLOPT_POSTFIELDS => $fields,
     ]);
 
@@ -708,12 +746,23 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
 
     $data = json_decode($response, true);
 
-    if ($httpCode < 200 || $httpCode >= 300 || empty($data['secure_url'])) {
+    if (!is_array($data)) {
+        return [false, 'Cloudinary returned an invalid response.'];
+    }
+
+    if ($httpCode < 200 || $httpCode >= 300) {
         $message =
             $data['error']['message'] ??
             'Cloudinary rejected the receipt upload.';
 
         return [false, 'Cloudinary upload failed: ' . $message];
+    }
+
+    if (empty($data['secure_url'])) {
+        return [
+            false,
+            'Cloudinary uploaded the receipt but did not return a secure URL.'
+        ];
     }
 
     return [true, [
@@ -978,7 +1027,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 
     $orders = load_orders();
     $orders[] = $order;
-    save_orders($orders);
+
+    if (!save_orders($orders)) {
+        $_SESSION['flash'] = [
+            'type' => 'error',
+            'msg' => 'The receipt was uploaded, but the order could not be saved. Please try again.'
+        ];
+        redirect_page('my-orders');
+    }
 
     if (!isset($_SESSION['guest_order_ids'])) $_SESSION['guest_order_ids'] = [];
     if (!in_array($orderId, $_SESSION['guest_order_ids'], true)) $_SESSION['guest_order_ids'][] = $orderId;
