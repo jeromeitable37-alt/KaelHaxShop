@@ -359,22 +359,240 @@ function save_users($users) {
 
 function orders_file() { return __DIR__ . '/data/orders.json'; }
 function receipts_dir() { return __DIR__ . '/receipts'; }
+
+/* -------------------- PERSISTENT ORDER STORAGE -------------------- */
 function ensure_orders_storage() {
+    /*
+     * Keep the local folders for development and legacy compatibility.
+     * Production orders are stored in Upstash Redis when configured.
+     */
     $dataDir = dirname(orders_file());
     if (!is_dir($dataDir)) @mkdir($dataDir, 0755, true);
-    if (!file_exists(orders_file())) @file_put_contents(orders_file(), "[]");
     if (!is_dir(receipts_dir())) @mkdir(receipts_dir(), 0755, true);
+
+    if (!file_exists(orders_file())) {
+        @file_put_contents(orders_file(), "[]", LOCK_EX);
+    }
 }
-function load_orders() {
+
+function upstash_config() {
+    $url = '';
+    $token = '';
+
+    /* Vercel + Upstash integration names. */
+    if (function_exists('getenv')) {
+        $url = (string)(getenv('KV_REST_API_URL') ?: '');
+        $token = (string)(getenv('KV_REST_API_TOKEN') ?: '');
+    }
+
+    /* Standard Upstash names are also supported. */
+    if ($url === '' && function_exists('getenv')) {
+        $url = (string)(getenv('UPSTASH_REDIS_REST_URL') ?: '');
+    }
+
+    if ($token === '' && function_exists('getenv')) {
+        $token = (string)(getenv('UPSTASH_REDIS_REST_TOKEN') ?: '');
+    }
+
+    /* Fallback to PHP environment arrays. */
+    if ($url === '' && isset($_ENV['KV_REST_API_URL'])) {
+        $url = (string)$_ENV['KV_REST_API_URL'];
+    }
+
+    if ($token === '' && isset($_ENV['KV_REST_API_TOKEN'])) {
+        $token = (string)$_ENV['KV_REST_API_TOKEN'];
+    }
+
+    if ($url === '' && isset($_SERVER['KV_REST_API_URL'])) {
+        $url = (string)$_SERVER['KV_REST_API_URL'];
+    }
+
+    if ($token === '' && isset($_SERVER['KV_REST_API_TOKEN'])) {
+        $token = (string)$_SERVER['KV_REST_API_TOKEN'];
+    }
+
+    return [
+        'url' => rtrim($url, '/'),
+        'token' => $token,
+    ];
+}
+
+function upstash_configured() {
+    $config = upstash_config();
+    return $config['url'] !== '' && $config['token'] !== '';
+}
+
+function upstash_request($command, $endpoint = '') {
+    $config = upstash_config();
+
+    if ($config['url'] === '' || $config['token'] === '') {
+        return [false, 'Upstash Redis is not configured.'];
+    }
+
+    $url = $config['url'] . ($endpoint !== '' ? '/' . ltrim($endpoint, '/') : '');
+
+    $body = json_encode(
+        $command,
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+    );
+
+    if ($body === false) {
+        return [false, 'Unable to encode Redis request.'];
+    }
+
+    $ch = curl_init($url);
+
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $config['token'],
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => $body,
+    ]);
+
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    if ($response === false || $error !== '') {
+        return [false, 'Upstash connection failed: ' . ($error ?: 'Unknown connection error.')];
+    }
+
+    $data = json_decode($response, true);
+
+    if ($httpCode < 200 || $httpCode >= 300) {
+        return [false, is_array($data) ? ($data['error'] ?? 'Upstash request failed.') : 'Upstash request failed.'];
+    }
+
+    if (is_array($data) && isset($data['error'])) {
+        return [false, (string)$data['error']];
+    }
+
+    if (is_array($data) && array_key_exists('result', $data)) {
+        return [true, $data['result']];
+    }
+
+    return [true, $data];
+}
+
+function load_legacy_orders() {
     ensure_orders_storage();
+
     $json = @file_get_contents(orders_file());
     $orders = json_decode($json ?: '[]', true);
+
     return is_array($orders) ? $orders : [];
 }
-function save_orders($orders) {
-    ensure_orders_storage();
-    @file_put_contents(orders_file(), json_encode(array_values($orders), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+
+function load_orders() {
+    /*
+     * Production path: persistent Redis-backed orders.
+     */
+    if (upstash_configured()) {
+        [$ok, $result] = upstash_request([
+            'HGETALL',
+            'kaelhax:orders:v1'
+        ]);
+
+        if (!$ok) {
+            /*
+             * Do NOT fall back to local orders in production when Redis
+             * was configured. That would make the application appear to
+             * lose orders when the database is temporarily unavailable.
+             */
+            return [];
+        }
+
+        $orders = [];
+
+        if (is_array($result)) {
+            for ($i = 0, $count = count($result); $i + 1 < $count; $i += 2) {
+                $orderJson = (string)$result[$i + 1];
+                $order = json_decode($orderJson, true);
+
+                if (is_array($order) && !empty($order['id'])) {
+                    $orders[] = $order;
+                }
+            }
+        }
+
+        /*
+         * One-time migration for legacy local orders created before
+         * Upstash was configured.
+         */
+        if (!$orders) {
+            $legacy = load_legacy_orders();
+
+            if ($legacy) {
+                save_orders($legacy);
+                return $legacy;
+            }
+        }
+
+        return $orders;
+    }
+
+    /* Local development fallback. */
+    return load_legacy_orders();
 }
+
+function save_orders($orders) {
+    $orders = array_values(array_filter($orders, function ($order) {
+        return is_array($order) && !empty($order['id']);
+    }));
+
+    /*
+     * Production: save every order as an individual Redis hash field.
+     */
+    if (upstash_configured()) {
+        $commands = [];
+
+        foreach ($orders as $order) {
+            $orderJson = json_encode(
+                $order,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+
+            if ($orderJson === false) {
+                continue;
+            }
+
+            $commands[] = [
+                'HSET',
+                'kaelhax:orders:v1',
+                (string)$order['id'],
+                $orderJson
+            ];
+        }
+
+        if (!$commands) {
+            return true;
+        }
+
+        [$ok, $result] = upstash_request($commands, 'pipeline');
+        return $ok;
+    }
+
+    /* Local development fallback. */
+    ensure_orders_storage();
+
+    return @file_put_contents(
+        orders_file(),
+        json_encode(
+            $orders,
+            JSON_PRETTY_PRINT |
+            JSON_UNESCAPED_SLASHES |
+            JSON_UNESCAPED_UNICODE
+        ),
+        LOCK_EX
+    ) !== false;
+}
+
 function new_order_id() {
     return 'KM-' . date('ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
 }
@@ -425,104 +643,62 @@ function cloudinary_configured() {
 }
 
 function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
-
     if (!cloudinary_configured()) {
-        return [
-            false,
-            'Cloudinary is not configured. Please check CLOUDINARY_URL.'
-        ];
+        return [false, 'Cloudinary is not configured. Please set CLOUDINARY_URL.'];
     }
 
     if (!file_exists($tmpPath) || !is_readable($tmpPath)) {
-        return [
-            false,
-            'The uploaded receipt could not be read.'
-        ];
+        return [false, 'The uploaded receipt could not be read.'];
     }
 
     $config = cloudinary_config();
-
-    $safeOrderId = preg_replace(
-        '/[^A-Za-z0-9_-]/',
-        '',
-        $orderId
-    );
-
-    $publicId =
-        'payment-receipts/' .
-        $safeOrderId .
-        '_' .
-        bin2hex(random_bytes(6));
+    $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '', $orderId);
+    $publicId = 'payment-receipts/' . $safeOrderId . '_' . bin2hex(random_bytes(6));
+    $timestamp = time();
 
     /*
-     * Payment receipts are treated as images.
-     * Cloudinary Upload API endpoint:
-     *
-     * /image/upload
+     * Cloudinary signed Upload API request.
+     * The upload endpoint expects signed request parameters rather than
+     * HTTP Basic authentication.
      */
+    $signingParams = [
+        'public_id' => $publicId,
+        'timestamp' => $timestamp,
+    ];
+
+    ksort($signingParams);
+    $signatureBase = http_build_query($signingParams, '', '&', PHP_QUERY_RFC3986);
+    $signature = sha1($signatureBase . $config['api_secret']);
+
     $endpoint =
         'https://api.cloudinary.com/v1_1/' .
         rawurlencode($config['cloud_name']) .
-        '/image/upload';
+        '/auto/upload';
 
     $fields = [
-        'file' => new CURLFile(
-            $tmpPath,
-            $mime,
-            basename($originalName)
-        ),
-
+        'file' => new CURLFile($tmpPath, $mime, basename($originalName)),
         'public_id' => $publicId,
-
-        'type' => 'upload'
+        'timestamp' => $timestamp,
+        'api_key' => $config['api_key'],
+        'signature' => $signature,
     ];
 
     $ch = curl_init($endpoint);
 
     curl_setopt_array($ch, [
-
         CURLOPT_POST => true,
-
         CURLOPT_RETURNTRANSFER => true,
-
         CURLOPT_TIMEOUT => 30,
-
-        /*
-         * Cloudinary backend authentication.
-         *
-         * API key + API secret are sent through HTTP Basic Auth.
-         * No signature calculation is required.
-         */
-        CURLOPT_USERPWD =>
-            $config['api_key'] .
-            ':' .
-            $config['api_secret'],
-
-        CURLOPT_HTTPAUTH =>
-            CURLAUTH_BASIC,
-
-        CURLOPT_POSTFIELDS =>
-            $fields,
-
+        CURLOPT_POSTFIELDS => $fields,
     ]);
 
     $response = curl_exec($ch);
-
     $curlError = curl_error($ch);
-
-    $httpCode =
-        curl_getinfo(
-            $ch,
-            CURLINFO_HTTP_CODE
-        );
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
     curl_close($ch);
 
-    if (
-        $response === false ||
-        $curlError !== ''
-    ) {
-
+    if ($response === false || $curlError !== '') {
         return [
             false,
             'Cloudinary connection failed: ' .
@@ -530,67 +706,25 @@ function cloudinary_upload_receipt($tmpPath, $originalName, $mime, $orderId) {
         ];
     }
 
-    $data =
-        json_decode(
-            $response,
-            true
-        );
+    $data = json_decode($response, true);
 
-    if (
-        $httpCode < 200 ||
-        $httpCode >= 300
-    ) {
-
+    if ($httpCode < 200 || $httpCode >= 300 || empty($data['secure_url'])) {
         $message =
-            $data['error']['message']
-            ?? 'Cloudinary rejected the receipt upload.';
+            $data['error']['message'] ??
+            'Cloudinary rejected the receipt upload.';
 
-        return [
-            false,
-            'Cloudinary upload failed: ' .
-            $message
-        ];
+        return [false, 'Cloudinary upload failed: ' . $message];
     }
 
-    if (
-        empty($data['secure_url'])
-    ) {
-
-        return [
-            false,
-            'Cloudinary uploaded the receipt but did not return a secure URL.'
-        ];
-    }
-
-    return [
-        true,
-        [
-            'url' =>
-                $data['secure_url'],
-
-            'public_id' =>
-                $data['public_id']
-                ?? $publicId,
-
-            'asset_id' =>
-                $data['asset_id']
-                ?? '',
-
-            'resource_type' =>
-                $data['resource_type']
-                ?? 'image',
-
-            'format' =>
-                $data['format']
-                ?? '',
-
-            'mime' =>
-                $mime,
-
-            'filename' =>
-                basename($originalName),
-        ]
-    ];
+    return [true, [
+        'url' => $data['secure_url'],
+        'public_id' => $data['public_id'] ?? $publicId,
+        'asset_id' => $data['asset_id'] ?? '',
+        'resource_type' => $data['resource_type'] ?? 'image',
+        'format' => $data['format'] ?? '',
+        'mime' => $mime,
+        'filename' => basename($originalName),
+    ]];
 }
 function save_receipt_upload($file, $orderId) {
     if (!isset($file) || !is_array($file)) {
