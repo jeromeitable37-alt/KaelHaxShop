@@ -1,0 +1,22 @@
+{
+    "site_name": "Project Market",
+    "site_brand": "KAELHAX",
+    "shop_title": "Shop",
+    "shop_description": "Browse all administrator managed digital projects and packages.",
+    "preview_title": "Preview",
+    "preview_description": "Browse the current project previews before choosing a package.",
+    "promos_title": "Promos",
+    "promos_description": "Featured products with promotional pricing.",
+    "concerns_title": "Concerns",
+    "concerns_description": "Send an order concern to the administrator through Telegram.",
+    "terms_title": "Terms",
+    "terms_description": "General marketplace and order guidelines.",
+    "account_title": "My Account",
+    "account_description": "Manage your buyer session.",
+    "orders_title": "My Orders",
+    "orders_description": "Track your submitted orders and payment review status.",
+    "footer_text": "Project Market Digital marketplace • Orders are manually reviewed",
+    "payment_title": "PAYMENT QR",
+    "payment_description": "Scan the QR below to complete your payment.",
+    "payment_note": "After paying, upload your receipt below. Accepted: JPG, PNG, WEBP, PDF. Maximum 5 MB."
+}

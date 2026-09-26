@@ -1,0 +1,7 @@
+{
+    "shop_enabled": true,
+    "registration_enabled": true,
+    "telegram_enabled": true,
+    "payment_qr": "assets/payment-qr.png",
+    "currency": "PHP"
+}

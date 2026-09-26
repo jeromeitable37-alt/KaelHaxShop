@@ -1,0 +1,82 @@
+{
+    "injector": {
+        "slug": "injector",
+        "category": "CODM",
+        "name": "KAELHAX INJECTOR | CODMGR",
+        "image": "assets/injector.jpg",
+        "promo": false,
+        "details_title": "👌 INFO DETAILS 👌",
+        "details": [
+            "3-7 Days Ban Only",
+            "Strong Bypass",
+            "Compatible to Low-End",
+            "Unlock All Skins",
+            "Can Play Brutal"
+        ],
+        "price_title": "OFFICIAL PRICELIST",
+        "tiers": [
+            [
+                "7 Days Access",
+                100,
+                null
+            ],
+            [
+                "15 Days Access",
+                150,
+                null
+            ],
+            [
+                "30 Days Access",
+                200,
+                null
+            ],
+            [
+                "Lifetime Access",
+                250,
+                null
+            ]
+        ]
+    },
+    "codmgr-vip": {
+        "slug": "codmgr-vip",
+        "category": "CODM",
+        "name": "KAELHAX VIP ACCESS | CODMGR",
+        "image": "assets/codmgr-mod.jpg",
+        "promo": true,
+        "features": [
+            "LOADER",
+            "MOD"
+        ],
+        "details_title": "👌 FULL DETAILS 👌",
+        "details": [
+            "3-7 Days Ban Only",
+            "No Auto Ban",
+            "Strong Bypass",
+            "Unlock All Skins & Mythic Attachments",
+            "Easy LB this season"
+        ],
+        "price_title": "PRICELIST PROMO",
+        "tiers": [
+            [
+                "7 Days Access",
+                100,
+                "2/5"
+            ],
+            [
+                "15 Days Access",
+                150,
+                "0/5"
+            ],
+            [
+                "30 Days Access",
+                200,
+                "0/5"
+            ],
+            [
+                "Lifetime Access",
+                350,
+                "1/5"
+            ]
+        ]
+    }
+}
