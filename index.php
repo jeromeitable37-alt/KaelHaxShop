@@ -16,7 +16,7 @@ if (!defined('TELEGRAM_CHAT_ID')) define('TELEGRAM_CHAT_ID', getenv('TELEGRAM_CH
 if (!defined('TELEGRAM_CHANNEL_USERNAME')) define('TELEGRAM_CHANNEL_USERNAME', getenv('TELEGRAM_CHANNEL_USERNAME') ?: '');
 if (!defined('ADMIN_USERNAME')) define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
 if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: 'admin123');
-if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kielhax.elementfx.com');
+if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kael-hax-shop.vercel.app');
 
 $defaultProducts = [
     'injector' => [
