@@ -2952,9 +2952,6 @@ async function chatSubmitForm(form) {
     chatUpdateCharCount(form);
     chatSetSendState(form, 'sent', 'Sent');
 
-    if (viewer === 'buyer') {
-      chatMarkRead('');
-    }
   } catch (error) {
     chatSetSendState(
       form,
