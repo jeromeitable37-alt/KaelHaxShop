@@ -2180,7 +2180,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
             <p>Choose a buyer from the inbox to view and reply to the conversation.</p>
           <?php else: ?>
             <div class="chat-header admin-thread-header">
-              <div><strong>@<?= e($selectedChatUser) ?></strong><span>Buyer support conversation</span></div>
+              <div><strong>@<?= e($selectedChatUser) ?></strong><span><span class="chat-status-dot"></span> Buyer support conversation</span></div>
               <a class="small-btn" href="index.php?page=admin&tab=orders">View Orders</a>
             </div>
             <div class="chat-thread admin-thread-scroll" id="adminChatThread" data-chat-viewer="admin" data-chat-user="<?= e($selectedChatUser) ?>">
@@ -2722,7 +2722,8 @@ async function chatSubmitForm(form) {
       throw new Error(payload?.error || 'Unable to send message.');
     }
 
-    const thread = form.closest('.chat-shell')?.querySelector('.chat-thread');
+    const chatContainer = form.closest('.chat-shell, .chat-admin-thread');
+    const thread = chatContainer?.querySelector('.chat-thread');
     const viewer = form.id === 'adminChatForm' ? 'admin' : 'buyer';
     if (thread) {
       chatRenderMessages(thread, payload.conversation, viewer, true);
@@ -2746,12 +2747,14 @@ async function chatSubmitForm(form) {
 async function chatPoll() {
   const buyerThread = document.getElementById('buyerChatThread');
   const adminThread = document.getElementById('adminChatThread');
-  if (!buyerThread && !adminThread) return;
+  const adminInbox = document.getElementById('adminChatInbox');
 
-  const isAdminThread = !!adminThread;
-  const selectedUser = isAdminThread ? (adminThread.dataset.chatUser || '') : '';
-  const previousThread = isAdminThread ? adminThread : buyerThread;
-  const previousLastId = previousThread.dataset.lastMessageId || '';
+  if (!buyerThread && !adminThread && !adminInbox) return;
+
+  const isAdmin = !!adminInbox || !!adminThread;
+  const selectedUser = adminThread ? (adminThread.dataset.chatUser || '') : '';
+  const previousThread = adminThread || buyerThread || null;
+  const previousLastId = previousThread?.dataset.lastMessageId || '';
 
   try {
     const url = new URL('index.php', window.location.href);
@@ -2764,6 +2767,12 @@ async function chatPoll() {
       headers: {'Accept':'application/json'}
     });
 
+    if (response.status === 401) {
+      const status = document.getElementById('buyerChatLiveStatus');
+      if (status) status.textContent = 'RELOGIN';
+      return;
+    }
+
     if (!response.ok) return;
     const payload = await response.json();
     if (!payload?.ok) return;
@@ -2772,28 +2781,41 @@ async function chatPoll() {
     const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
     const newLastId = messages.length ? String(messages[messages.length - 1].id || '') : '';
 
-    if (newLastId && previousLastId && newLastId !== previousLastId) {
+    if (previousThread && newLastId && previousLastId && newLastId !== previousLastId) {
       const newest = messages[messages.length - 1];
       if (newest?.sender_type !== chatViewer) {
         chatPlayIncomingTone();
         chatVibrateIncoming();
-        const newPill = document.getElementById(isAdminThread ? 'adminChatNewMessage' : 'buyerChatNewMessage');
-        const thread = previousThread;
-        if (newPill && !chatIsNearBottom(thread)) newPill.hidden = false;
+
+        const container = previousThread.closest('.chat-shell, .chat-admin-thread');
+        const newPill = container?.querySelector('.chat-new-message');
+        if (newPill && !chatIsNearBottom(previousThread)) {
+          newPill.hidden = false;
+        }
       }
     }
 
-    chatRenderMessages(previousThread, conversation, isAdminThread ? 'admin' : 'buyer', true);
+    if (previousThread) {
+      const wasNearBottom = chatIsNearBottom(previousThread);
+      chatRenderMessages(
+        previousThread,
+        conversation,
+        isAdmin ? 'admin' : 'buyer',
+        true
+      );
+      if (wasNearBottom && newLastId !== previousLastId) {
+        chatScrollBottom(previousThread, true);
+      }
+    }
 
-    if (isAdminThread) {
+    if (isAdmin && adminInbox) {
       chatRenderInbox(payload.conversations || [], selectedUser);
-      previousThread.dataset.chatUser = String(payload.selected_user || selectedUser);
     }
 
     const liveStatus = document.getElementById('buyerChatLiveStatus');
     if (liveStatus) liveStatus.textContent = 'LIVE';
 
-    const form = document.getElementById(isAdminThread ? 'adminChatForm' : 'buyerChatForm');
+    const form = document.getElementById(isAdmin ? 'adminChatForm' : 'buyerChatForm');
     if (form) chatUpdateCharCount(form);
   } catch (_) {}
 }
@@ -2829,7 +2851,8 @@ function initEnhancedChat() {
   for (const form of forms) {
     const textarea = form.querySelector('textarea[name="message"]');
     const emojiButton = form.querySelector('[data-emoji-button]');
-    const thread = form.closest('.chat-shell')?.querySelector('.chat-thread');
+    const chatContainer = form.closest('.chat-shell, .chat-admin-thread');
+    const thread = chatContainer?.querySelector('.chat-thread');
 
     if (textarea) {
       textarea.addEventListener('focus', chatUnlockSound);
@@ -2859,7 +2882,7 @@ function initEnhancedChat() {
     }
 
     thread?.addEventListener('scroll', () => {
-      const pill = form.closest('.chat-shell')?.querySelector('.chat-new-message');
+      const pill = form.closest('.chat-shell, .chat-admin-thread')?.querySelector('.chat-new-message');
       if (pill && chatIsNearBottom(thread)) pill.hidden = true;
     });
 
