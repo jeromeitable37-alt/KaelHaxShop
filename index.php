@@ -1292,15 +1292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'chat_po
 
     $selectedConversation = $selectedUser !== '' ? chat_get_conversation($selectedUser) : null;
 
-    if ($role === 'admin' && $selectedUser !== '') {
-        /* Opening/keeping the selected thread active marks incoming buyer messages as read. */
-        chat_mark_read($selectedUser, 'admin');
-        $selectedConversation = chat_get_conversation($selectedUser);
-    } elseif ($role === 'buyer' && $selectedUser !== '') {
-        chat_mark_read($selectedUser, 'buyer');
-        $selectedConversation = chat_get_conversation($selectedUser);
-    }
-
     $response = [
         'ok' => true,
         'role' => $role,
@@ -1392,6 +1383,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 
     $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Message sent successfully.'];
     redirect_to($back);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chat_mark_read') {
+    if (!is_user() && !is_admin()) {
+        chat_json_response(['ok' => false, 'error' => 'Please log in again.'], 401);
+    }
+
+    $isAjaxChat = ($_POST['ajax'] ?? '') === '1';
+
+    if (is_admin()) {
+        $username = chat_identity($_POST['username'] ?? '');
+        if ($username === '') {
+            if ($isAjaxChat) chat_json_response(['ok' => false, 'error' => 'Conversation not found.'], 422);
+            redirect_page('admin');
+        }
+        $readerType = 'admin';
+    } else {
+        $username = chat_identity($_SESSION['buyer_username'] ?? '');
+        $readerType = 'buyer';
+    }
+
+    $ok = $username !== '' && chat_mark_read($username, $readerType);
+
+    if ($isAjaxChat) {
+        chat_json_response([
+            'ok' => $ok || $username === '',
+            'username' => $username,
+            'unread_total' => chat_unread_total($readerType, $username),
+        ]);
+    }
+
+    redirect_to(is_admin()
+        ? 'index.php?page=admin&tab=messages&user=' . rawurlencode($username)
+        : 'index.php?page=messages'
+    );
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_order') {
@@ -1827,6 +1853,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 .chat-shell{border:1px solid var(--line);background:var(--surface);border-radius:18px;overflow:hidden;max-width:860px}.chat-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 16px;border-bottom:1px solid var(--line);background:#101720}.chat-header strong{display:block;font-size:15px}.chat-header span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.chat-status{display:inline-flex!important;border:1px solid #275f44;border-radius:999px;padding:5px 8px;color:var(--green)!important;font-size:9px!important;font-weight:900}.chat-thread{padding:16px;min-height:340px;max-height:540px;overflow:auto;background:#0b1017}.chat-row{display:flex;margin:8px 0}.chat-row.mine{justify-content:flex-end}.chat-row.theirs{justify-content:flex-start}.chat-bubble{max-width:min(78%,620px);border:1px solid #293341;background:#151d27;border-radius:15px;padding:10px 11px}.chat-row.mine .chat-bubble{background:#1a293a;border-color:#31506d}.chat-author{font-size:10px;color:var(--blue);font-weight:900;margin-bottom:5px}.chat-text{font-size:13px;line-height:1.5;color:#e4eaf1;word-break:break-word}.chat-inline-link{color:#89b8ff;text-decoration:underline}.chat-time{font-size:9px;color:#788496;margin-top:7px}.chat-link-btn{display:inline-flex;margin-top:8px;border:1px solid #31465d;background:#14202d;color:#a9c9ef;border-radius:9px;padding:7px 9px;font-size:10px;font-weight:900}.chat-empty{text-align:center;padding:70px 18px;color:#7f8b9a;font-size:12px;line-height:1.6}.chat-compose{padding:13px;border-top:1px solid var(--line);background:#101720}.chat-compose textarea{width:100%;min-height:90px;resize:vertical;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-compose-row{display:grid;grid-template-columns:1fr auto;gap:9px;margin-top:9px}.chat-compose-row input{width:100%;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.chat-send{width:auto;min-width:150px;margin-top:0}.chat-admin-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:14px}.chat-inbox-list{display:grid;gap:8px;max-height:620px;overflow:auto}.chat-inbox-item{display:block;border:1px solid var(--line);background:#101720;border-radius:12px;padding:11px;color:inherit}.chat-inbox-item:hover,.chat-inbox-item.active{border-color:#31567f;background:#182332}.chat-inbox-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.chat-inbox-top strong{font-size:12px}.chat-inbox-preview{margin-top:5px;color:#b0bac7;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-inbox-time{margin-top:5px;color:#758091;font-size:9px}.chat-unread{display:inline-flex;min-width:20px;height:20px;align-items:center;justify-content:center;border-radius:999px;background:#70a6ff;color:#07101a;font-size:9px;font-weight:900}.chat-admin-thread{min-width:0}.admin-thread-header{margin:-18px -18px 0}.admin-thread-scroll{min-height:360px;max-height:560px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}.chat-admin-thread .chat-header{border-radius:16px 16px 0 0}
 .chat-page{max-width:980px;position:relative}.chat-page-header{padding:13px 15px}.chat-contact{display:flex;align-items:center;gap:11px}.chat-avatar{width:41px;height:41px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(145deg,#243b55,#162334);border:1px solid #35516f;color:#dcecff;font-size:15px;font-weight:900;box-shadow:0 8px 25px rgba(0,0,0,.18)}.chat-status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#51dc92;box-shadow:0 0 10px rgba(81,220,146,.55);vertical-align:1px;margin-right:5px}.chat-live-pill{border:1px solid #275f44;background:rgba(81,220,146,.06);color:#9be8bc;border-radius:999px;padding:6px 9px;font-size:9px;font-weight:900;letter-spacing:.08em}.chat-page-thread{height:min(62vh,620px);min-height:420px;max-height:none;padding:18px 17px 22px;background:radial-gradient(circle at 50% 0%,rgba(114,166,255,.035),transparent 33%),#0b1017;scroll-behavior:smooth}.chat-row{margin:6px 0}.chat-bubble{position:relative;box-shadow:0 6px 18px rgba(0,0,0,.12)}.chat-row.mine .chat-bubble{border-bottom-right-radius:6px}.chat-row.theirs .chat-bubble{border-bottom-left-radius:6px}.chat-meta-line{display:flex;justify-content:flex-end;align-items:center;gap:7px;margin-top:6px;color:#788496;font-size:9px}.chat-row.theirs .chat-meta-line{justify-content:flex-start}.chat-separator{display:flex;align-items:center;gap:9px;color:#687487;font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;margin:16px 0}.chat-separator::before,.chat-separator::after{content:"";height:1px;background:#202a36;flex:1}.chat-new-message{position:absolute;right:18px;bottom:105px;z-index:5;border:1px solid #35567d;background:#17283a;color:#bcd9ff;border-radius:999px;padding:8px 11px;font-size:10px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.35);cursor:pointer}.chat-new-message[hidden]{display:none}.chat-modern-compose{padding:11px 13px 13px}.chat-compose-top{display:flex;align-items:center;gap:8px;margin-bottom:7px}.chat-compose-hint{color:#667487;font-size:9px;flex:1}.chat-char-count{color:#667487;font-size:9px;font-variant-numeric:tabular-nums}.chat-emoji-btn{border:1px solid #2d3948;background:#131c26;color:#dce4ee;border-radius:10px;width:31px;height:31px;padding:0;display:grid;place-items:center}.chat-input-wrap{position:relative}.chat-input-wrap textarea{padding:11px 46px 11px 12px;min-height:43px;max-height:150px;resize:none;overflow:auto}.chat-send-icon{position:absolute;right:7px;bottom:7px;width:34px;height:34px;border:0;border-radius:10px;background:#70a6ff;color:#07101a;font-weight:900}.chat-optional-row{margin-top:7px}.chat-optional-row input{width:100%;background:#090e14;border:1px solid #293441;color:var(--text);border-radius:10px;padding:8px 10px;outline:0;font-size:11px}.chat-compose-footer{display:flex;justify-content:space-between;align-items:center;gap:10px}.chat-compose-footer .notice{margin-top:6px}.chat-send-state{font-size:9px;color:#758091}.chat-send-state.sending{color:#f3d28a}.chat-send-state.sent{color:#9be8bc}.chat-send-state.error{color:#ffb1bd}.chat-inbox-item.unread-pulse{animation:chatInboxPulse 1s ease-in-out 2}.chat-inbox-item .chat-inbox-preview strong{color:#fff}.chat-inbox-unread-label{display:inline-flex;align-items:center;gap:5px;color:#9bc3ff;font-size:9px;font-weight:900;margin-top:5px}.chat-row.new-message .chat-bubble{animation:chatMessageIn .22s cubic-bezier(.2,.8,.2,1)}@keyframes chatInboxPulse{50%{transform:translateX(3px);border-color:#4c76a4}}@keyframes chatMessageIn{from{opacity:0;transform:translateY(5px) scale(.985)}to{opacity:1;transform:none}}@media(max-width:700px){.chat-page-thread{height:calc(100vh - 280px);min-height:330px;padding:13px 11px 18px}.chat-new-message{right:12px;bottom:112px}.chat-compose-hint{display:none}.chat-avatar{width:38px;height:38px}.chat-live-pill{padding:6px 8px}.chat-modern-compose{padding:9px}.chat-input-wrap textarea{font-size:16px}.chat-compose-footer .notice{font-size:9px}.admin-thread-scroll{height:calc(100vh - 450px);min-height:300px}}
 
+.chat-message-toast{position:fixed;right:18px;top:88px;z-index:125;width:min(340px,calc(100vw - 28px));padding:11px 13px;border:1px solid #31567f;background:linear-gradient(135deg,#172536,#101820);border-radius:14px;box-shadow:0 16px 50px rgba(0,0,0,.42);opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none;transition:.22s}.chat-message-toast.show{opacity:1;transform:none}.chat-message-toast strong{display:block;font-size:12px;color:#eef4fb}.chat-message-toast span{display:block;font-size:10px;color:#9ca8b8;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}@media(max-width:700px){.chat-message-toast{top:90px;right:10px;width:calc(100vw - 20px)}}
 .pwa-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 18px;padding:12px 13px;border:1px solid var(--line);background:#101720;border-radius:14px}.pwa-tools-left{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pwa-tools button{border:1px solid var(--line);background:#18212b;color:#e7edf4;border-radius:10px;padding:9px 11px;font-size:11px;font-weight:900}.pwa-tools button.primary-tool{background:#70a6ff;color:#07101a;border-color:#70a6ff}.pwa-tools button:disabled{opacity:.55;cursor:not-allowed}.pwa-status{font-size:10px;color:#8e9aaa}.order-notification-toast{position:fixed;right:18px;bottom:18px;z-index:120;width:min(400px,calc(100vw - 28px));padding:0;overflow:hidden;border:1px solid #31567f;background:linear-gradient(135deg,#152131,#0f171f);color:#eef4fb;border-radius:18px;box-shadow:0 22px 70px rgba(0,0,0,.45);display:none;transform:translateY(14px) scale(.98);opacity:0}.order-notification-toast.show{display:block;animation:toastPop .28s cubic-bezier(.22,.8,.2,1) forwards}.order-notification-toast::before{content:"";display:block;height:3px;background:linear-gradient(90deg,#70a6ff,#51dc92)}.order-notification-inner{display:grid;grid-template-columns:42px 1fr auto;gap:11px;align-items:start;padding:13px}.order-notification-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:#1b2a3a;border:1px solid #33475e;font-size:20px;box-shadow:inset 0 0 18px rgba(114,166,255,.08)}.order-notification-copy strong{display:block;font-size:13px;letter-spacing:.01em}.order-notification-copy span{display:block;color:#aeb8c6;font-size:11px;margin-top:4px;line-height:1.45}.order-notification-copy a{display:inline-flex;margin-top:9px;color:#9bc3ff;font-size:10px;font-weight:900}.order-notification-close{width:28px;height:28px;border-radius:9px;border:1px solid #2e3c4c;background:#141d27;color:#aeb8c6;cursor:pointer;font-size:17px;line-height:1}.order-notification-close:hover{color:#fff;background:#1b2734}.order-notification-toast.pulse .order-notification-icon{animation:notifyPulse .8s ease-in-out infinite}.pwa-install-note{font-size:10px;color:#778394;line-height:1.45}@keyframes toastPop{0%{opacity:0;transform:translateY(14px) scale(.98)}100%{opacity:1;transform:translateY(0) scale(1)}}@keyframes notifyPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}@media(max-width:700px){.order-notification-toast{right:10px;bottom:12px;width:calc(100vw - 20px)}}
 .modal-backdrop{position:fixed;z-index:90;inset:0;background:rgba(0,0,0,.72);display:none;align-items:flex-end;justify-content:center;padding:0}.modal-backdrop.open{display:flex}.modal{width:min(650px,100%);max-height:94vh;overflow:auto;background:#0d131b;border:1px solid var(--line);border-radius:21px 21px 0 0;padding:18px 15px 25px}.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.modal-head h2{margin:4px 0;font-size:24px}.modal-muted{color:var(--muted);margin:0;font-size:13px}.close{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);color:#cbd4df;border-radius:10px;font-size:24px}
 @media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}.chat-admin-layout{grid-template-columns:1fr}.chat-inbox-list{max-height:260px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}}
@@ -2514,10 +2541,13 @@ window.addEventListener('appinstalled', () => {
 });
 
 
-/* -------------------- ENHANCED REAL-TIME CHAT -------------------- */
+/* -------------------- REAL-TIME CHAT SYSTEM -------------------- */
 const chatViewer = isAdminPortal ? 'admin' : <?= is_user() ? "'buyer'" : "'none'" ?>;
 let chatPollTimer = null;
+let chatPollBusy = false;
 let chatSoundContext = null;
+let adminConversationCache = [];
+let chatLastServerUpdate = '';
 
 function chatEscape(value) {
   return String(value ?? '').replace(/[&<>"']/g, m => ({
@@ -2526,7 +2556,7 @@ function chatEscape(value) {
 }
 
 function chatLinkify(value) {
-  let safe = chatEscape(value);
+  const safe = chatEscape(value);
   return safe.replace(/(https?:\/\/[^\s<]+)/gi, '<a class="chat-inline-link" href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
@@ -2543,9 +2573,37 @@ function chatFormatDay(value) {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diff = Math.round((start - day) / 86400000);
+
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
-  return d.toLocaleDateString([], {month:'short', day:'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined});
+
+  return d.toLocaleDateString([], {
+    month:'short',
+    day:'numeric',
+    year:d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+  });
+}
+
+function chatSetLiveStatus(state) {
+  const el = document.getElementById('buyerChatLiveStatus');
+  if (!el) return;
+
+  if (state === 'offline') {
+    el.textContent = 'OFFLINE';
+    el.style.color = '#ffb1bd';
+    el.style.borderColor = '#6a3542';
+    el.style.background = 'rgba(255,113,136,.06)';
+  } else if (state === 'syncing') {
+    el.textContent = 'SYNCING';
+    el.style.color = '#f3d28a';
+    el.style.borderColor = '#68552b';
+    el.style.background = 'rgba(243,210,138,.06)';
+  } else {
+    el.textContent = 'LIVE';
+    el.style.color = '';
+    el.style.borderColor = '';
+    el.style.background = '';
+  }
 }
 
 function chatPlayIncomingTone() {
@@ -2555,16 +2613,23 @@ function chatPlayIncomingTone() {
       if (!AudioCtx) return;
       chatSoundContext = new AudioCtx();
     }
-    if (chatSoundContext.state === 'suspended') chatSoundContext.resume().catch(() => {});
+
+    if (chatSoundContext.state === 'suspended') {
+      chatSoundContext.resume().catch(() => {});
+    }
+
     const now = chatSoundContext.currentTime;
     const gain = chatSoundContext.createGain();
     const osc = chatSoundContext.createOscillator();
+
     osc.type = 'sine';
     osc.frequency.setValueAtTime(760, now);
     osc.frequency.exponentialRampToValueAtTime(620, now + 0.12);
+
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(0.045, now + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+
     osc.connect(gain);
     gain.connect(chatSoundContext.destination);
     osc.start(now);
@@ -2577,7 +2642,9 @@ function chatUnlockSound() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
     if (!chatSoundContext) chatSoundContext = new AudioCtx();
-    if (chatSoundContext.state === 'suspended') chatSoundContext.resume().catch(() => {});
+    if (chatSoundContext.state === 'suspended') {
+      chatSoundContext.resume().catch(() => {});
+    }
   } catch (_) {}
 }
 
@@ -2593,13 +2660,40 @@ function chatIsNearBottom(thread) {
 
 function chatScrollBottom(thread, smooth = true) {
   if (!thread) return;
-  thread.scrollTo({top: thread.scrollHeight, behavior: smooth ? 'smooth' : 'auto'});
+  thread.scrollTo({
+    top: thread.scrollHeight,
+    behavior: smooth ? 'smooth' : 'auto'
+  });
 }
 
-function chatRenderMessages(thread, conversation, viewer, animateNew = false) {
+function chatShowToast(title, detail) {
+  let toast = document.getElementById('chatMessageToast');
+
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'chatMessageToast';
+    toast.className = 'chat-message-toast';
+    toast.innerHTML = '<strong></strong><span></span>';
+    document.body.appendChild(toast);
+  }
+
+  toast.querySelector('strong').textContent = title;
+  toast.querySelector('span').textContent = detail;
+  toast.classList.remove('show');
+  void toast.offsetWidth;
+  toast.classList.add('show');
+
+  clearTimeout(window.__chatToastTimer);
+  window.__chatToastTimer = setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+function chatRenderMessages(thread, conversation, viewer, forceScroll = false) {
   if (!thread) return;
 
-  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const messages = Array.isArray(conversation?.messages)
+    ? conversation.messages
+    : [];
+
   const wasNearBottom = chatIsNearBottom(thread);
   const previousLastId = thread.dataset.lastMessageId || '';
 
@@ -2612,12 +2706,12 @@ function chatRenderMessages(thread, conversation, viewer, animateNew = false) {
   let html = '';
   let previousDay = '';
 
-  for (const msg of messages) {
+  messages.forEach((msg) => {
     const senderType = msg.sender_type === 'admin' ? 'admin' : 'buyer';
     const mine = senderType === viewer;
-    const day = chatFormatDay(msg.created_at);
     const id = String(msg.id || '');
     const senderName = msg.sender_name || (senderType === 'admin' ? 'Administrator' : 'Buyer');
+    const day = chatFormatDay(msg.created_at);
 
     if (day !== previousDay) {
       html += '<div class="chat-separator">' + chatEscape(day) + '</div>';
@@ -2627,27 +2721,44 @@ function chatRenderMessages(thread, conversation, viewer, animateNew = false) {
     const counterpartRead = viewer === 'admin'
       ? !!msg.read_by_buyer
       : !!msg.read_by_admin;
-    const delivery = mine ? (counterpartRead ? 'Seen' : 'Sent') : '';
 
-    html += '<div class="chat-row ' + (mine ? 'mine' : 'theirs') + (animateNew && previousLastId && id !== previousLastId && messages.indexOf(msg) === messages.length - 1 ? ' new-message' : '') + '">';
+    const delivery = mine
+      ? (counterpartRead ? 'Seen' : 'Sent')
+      : '';
+
+    const isNew = id && previousLastId && id !== previousLastId && id === String(messages[messages.length - 1]?.id || '');
+
+    html += '<div class="chat-row ' +
+      (mine ? 'mine' : 'theirs') +
+      (isNew ? ' new-message' : '') +
+      '" data-message-id="' + chatEscape(id) + '">';
+
     html += '<div class="chat-bubble">';
     html += '<div class="chat-author">' + chatEscape(senderName) + '</div>';
     html += '<div class="chat-text">' + chatLinkify(msg.message || '') + '</div>';
 
     if (msg.link) {
-      html += '<a class="chat-link-btn" href="' + chatEscape(msg.link) + '" target="_blank" rel="noopener noreferrer">🔗 Open Link</a>';
+      html += '<a class="chat-link-btn" href="' +
+        chatEscape(msg.link) +
+        '" target="_blank" rel="noopener noreferrer">🔗 Open Link</a>';
     }
 
-    html += '<div class="chat-meta-line"><span>' + chatEscape(chatFormatTime(msg.created_at)) + '</span>';
-    if (delivery) html += '<span>• ' + chatEscape(delivery) + '</span>';
-    html += '</div>';
-    html += '</div></div>';
-  }
+    html += '<div class="chat-meta-line"><span>' +
+      chatEscape(chatFormatTime(msg.created_at)) +
+      '</span>';
+
+    if (delivery) {
+      html += '<span>• ' + chatEscape(delivery) + '</span>';
+    }
+
+    html += '</div></div></div>';
+  });
 
   thread.innerHTML = html;
   thread.dataset.lastMessageId = String(messages[messages.length - 1].id || '');
+  thread.dataset.lastUpdated = String(conversation.updated_at || '');
 
-  if (wasNearBottom || previousLastId === '') {
+  if (forceScroll || wasNearBottom || previousLastId === '') {
     chatScrollBottom(thread, false);
   }
 }
@@ -2656,168 +2767,97 @@ function chatRenderInbox(conversations, selectedUser) {
   const inbox = document.getElementById('adminChatInbox');
   if (!inbox || !Array.isArray(conversations)) return;
 
-  const rows = conversations.slice().sort((a,b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const rows = conversations
+    .slice()
+    .sort((a,b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+
+  adminConversationCache = rows;
+
   let html = '';
 
   for (const conversation of rows) {
     const username = String(conversation.username || '').toLowerCase();
     if (!username) continue;
-    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+
+    const messages = Array.isArray(conversation.messages)
+      ? conversation.messages
+      : [];
+
     const last = messages.length ? messages[messages.length - 1] : null;
     let unread = 0;
 
     for (const msg of messages) {
-      if (msg.sender_type === 'buyer' && !msg.read_by_admin) unread++;
+      if (msg.sender_type === 'buyer' && !msg.read_by_admin) {
+        unread++;
+      }
     }
 
     const active = username === String(selectedUser || '').toLowerCase();
-    const preview = last ? String(last.message || 'Attachment') : 'No messages';
-    const time = last ? chatFormatDay(last.created_at) + ' · ' + chatFormatTime(last.created_at) : '—';
+    const preview = last
+      ? String(last.message || 'New message')
+      : 'No messages';
 
-    html += '<a class="chat-inbox-item ' + (active ? 'active ' : '') + (unread ? 'unread-pulse' : '') + '" data-chat-user="' + chatEscape(username) + '" href="index.php?page=admin&tab=messages&user=' + encodeURIComponent(username) + '">';
-    html += '<div class="chat-inbox-top"><strong>@' + chatEscape(username) + '</strong>';
-    if (unread) html += '<span class="chat-unread">' + unread + '</span>';
+    const time = last
+      ? chatFormatDay(last.created_at) + ' · ' + chatFormatTime(last.created_at)
+      : '—';
+
+    html += '<a class="chat-inbox-item ' +
+      (active ? 'active ' : '') +
+      (unread ? 'unread-pulse' : '') +
+      '" data-chat-user="' + chatEscape(username) +
+      '" href="index.php?page=admin&tab=messages&user=' +
+      encodeURIComponent(username) + '">';
+
+    html += '<div class="chat-inbox-top"><strong>@' +
+      chatEscape(username) + '</strong>';
+
+    if (unread) {
+      html += '<span class="chat-unread">' + unread + '</span>';
+    }
+
     html += '</div>';
-    html += '<div class="chat-inbox-preview">' + chatEscape(preview) + '</div>';
-    html += '<div class="chat-inbox-time">' + chatEscape(time) + '</div>';
-    if (unread) html += '<div class="chat-inbox-unread-label">● Unread message' + (unread > 1 ? 's' : '') + '</div>';
+    html += '<div class="chat-inbox-preview">' +
+      chatEscape(preview) + '</div>';
+    html += '<div class="chat-inbox-time">' +
+      chatEscape(time) + '</div>';
+
+    if (unread) {
+      html += '<div class="chat-inbox-unread-label">● Unread message' +
+        (unread > 1 ? 's' : '') + '</div>';
+    }
+
     html += '</a>';
   }
 
-  inbox.innerHTML = html || '<div class="chat-empty" style="padding:40px 14px">No conversations yet.</div>';
+  inbox.innerHTML = html ||
+    '<div class="chat-empty" style="padding:40px 14px">No conversations yet.</div>';
 }
 
-function chatSetState(form, state, text) {
+async function chatMarkRead(username) {
+  if (!username) return;
+
+  const formData = new FormData();
+  formData.set('action', 'chat_mark_read');
+  formData.set('username', username);
+  formData.set('ajax', '1');
+  formData.set('csrf', <?= json_encode(csrf_token()) ?>);
+
+  try {
+    await fetch('index.php', {
+      method: 'POST',
+      body: formData,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'Accept':'application/json'}
+    });
+  } catch (_) {}
+}
+
+function chatSetSendState(form, state, label) {
   const el = form?.querySelector('.chat-send-state');
   if (!el) return;
   el.className = 'chat-send-state ' + state;
-  el.textContent = text;
-}
-
-async function chatSubmitForm(form) {
-  if (!form || form.dataset.busy === '1') return;
-  const textarea = form.querySelector('textarea[name="message"]');
-  if (!textarea || !textarea.value.trim()) return;
-
-  form.dataset.busy = '1';
-  chatSetState(form, 'sending', 'Sending…');
-  const button = form.querySelector('.chat-send-icon');
-  if (button) button.disabled = true;
-
-  const data = new FormData(form);
-  data.set('ajax', '1');
-
-  try {
-    chatUnlockSound();
-    const response = await fetch('index.php', {
-      method: 'POST',
-      body: data,
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: {'Accept':'application/json'}
-    });
-
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.error || 'Unable to send message.');
-    }
-
-    const chatContainer = form.closest('.chat-shell, .chat-admin-thread');
-    const thread = chatContainer?.querySelector('.chat-thread');
-    const viewer = form.id === 'adminChatForm' ? 'admin' : 'buyer';
-    if (thread) {
-      chatRenderMessages(thread, payload.conversation, viewer, true);
-      chatScrollBottom(thread, true);
-    }
-
-    textarea.value = '';
-    const linkInput = form.querySelector('input[name="link"]');
-    if (linkInput) linkInput.value = '';
-    chatAutoResize(textarea);
-    chatUpdateCharCount(form);
-    chatSetState(form, 'sent', 'Sent');
-  } catch (error) {
-    chatSetState(form, 'error', error?.message || 'Message failed');
-  } finally {
-    form.dataset.busy = '0';
-    if (button) button.disabled = false;
-  }
-}
-
-async function chatPoll() {
-  const buyerThread = document.getElementById('buyerChatThread');
-  const adminThread = document.getElementById('adminChatThread');
-  const adminInbox = document.getElementById('adminChatInbox');
-
-  if (!buyerThread && !adminThread && !adminInbox) return;
-
-  const isAdmin = !!adminInbox || !!adminThread;
-  const selectedUser = adminThread ? (adminThread.dataset.chatUser || '') : '';
-  const previousThread = adminThread || buyerThread || null;
-  const previousLastId = previousThread?.dataset.lastMessageId || '';
-
-  try {
-    const url = new URL('index.php', window.location.href);
-    url.searchParams.set('action', 'chat_poll');
-    if (selectedUser) url.searchParams.set('user', selectedUser);
-
-    const response = await fetch(url.toString(), {
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: {'Accept':'application/json'}
-    });
-
-    if (response.status === 401) {
-      const status = document.getElementById('buyerChatLiveStatus');
-      if (status) status.textContent = 'RELOGIN';
-      return;
-    }
-
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (!payload?.ok) return;
-
-    const conversation = payload.conversation || {messages:[]};
-    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
-    const newLastId = messages.length ? String(messages[messages.length - 1].id || '') : '';
-
-    if (previousThread && newLastId && previousLastId && newLastId !== previousLastId) {
-      const newest = messages[messages.length - 1];
-      if (newest?.sender_type !== chatViewer) {
-        chatPlayIncomingTone();
-        chatVibrateIncoming();
-
-        const container = previousThread.closest('.chat-shell, .chat-admin-thread');
-        const newPill = container?.querySelector('.chat-new-message');
-        if (newPill && !chatIsNearBottom(previousThread)) {
-          newPill.hidden = false;
-        }
-      }
-    }
-
-    if (previousThread) {
-      const wasNearBottom = chatIsNearBottom(previousThread);
-      chatRenderMessages(
-        previousThread,
-        conversation,
-        isAdmin ? 'admin' : 'buyer',
-        true
-      );
-      if (wasNearBottom && newLastId !== previousLastId) {
-        chatScrollBottom(previousThread, true);
-      }
-    }
-
-    if (isAdmin && adminInbox) {
-      chatRenderInbox(payload.conversations || [], selectedUser);
-    }
-
-    const liveStatus = document.getElementById('buyerChatLiveStatus');
-    if (liveStatus) liveStatus.textContent = 'LIVE';
-
-    const form = document.getElementById(isAdmin ? 'adminChatForm' : 'buyerChatForm');
-    if (form) chatUpdateCharCount(form);
-  } catch (_) {}
+  el.textContent = label;
 }
 
 function chatAutoResize(textarea) {
@@ -2830,23 +2870,264 @@ function chatUpdateCharCount(form) {
   if (!form) return;
   const textarea = form.querySelector('textarea[name="message"]');
   const counter = form.querySelector('.chat-char-count');
-  if (textarea && counter) counter.textContent = textarea.value.length + ' / ' + (textarea.maxLength || 3000);
+  if (textarea && counter) {
+    counter.textContent = textarea.value.length + ' / ' + (textarea.maxLength || 3000);
+  }
 }
 
 function chatInsertEmoji(form, emoji) {
   const textarea = form?.querySelector('textarea[name="message"]');
   if (!textarea) return;
+
   const start = textarea.selectionStart ?? textarea.value.length;
   const end = textarea.selectionEnd ?? textarea.value.length;
-  textarea.value = textarea.value.slice(0, start) + emoji + textarea.value.slice(end);
+
+  textarea.value =
+    textarea.value.slice(0, start) +
+    emoji +
+    textarea.value.slice(end);
+
   textarea.focus();
   textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+
   chatAutoResize(textarea);
   chatUpdateCharCount(form);
 }
 
+async function chatSubmitForm(form) {
+  if (!form || form.dataset.busy === '1') return;
+
+  const textarea = form.querySelector('textarea[name="message"]');
+  if (!textarea || !textarea.value.trim()) {
+    textarea?.focus();
+    return;
+  }
+
+  form.dataset.busy = '1';
+  chatSetSendState(form, 'sending', 'Sending…');
+
+  const button = form.querySelector('.chat-send-icon');
+  if (button) button.disabled = true;
+
+  const data = new FormData(form);
+  data.set('ajax', '1');
+
+  try {
+    chatUnlockSound();
+
+    const response = await fetch('/index.php', {
+      method: 'POST',
+      body: data,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'Accept':'application/json'}
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json')
+      ? await response.json()
+      : null;
+
+    if (!response.ok || !payload?.ok) {
+      throw new Error(
+        payload?.error ||
+        'The chat server did not return a valid response.'
+      );
+    }
+
+    const chatContainer = form.closest('.chat-shell, .chat-admin-thread');
+    const thread = chatContainer?.querySelector('.chat-thread');
+    const viewer = form.id === 'adminChatForm' ? 'admin' : 'buyer';
+
+    if (thread && payload.conversation) {
+      chatRenderMessages(thread, payload.conversation, viewer, true);
+    }
+
+    textarea.value = '';
+
+    const linkInput = form.querySelector('input[name="link"]');
+    if (linkInput) linkInput.value = '';
+
+    chatAutoResize(textarea);
+    chatUpdateCharCount(form);
+    chatSetSendState(form, 'sent', 'Sent');
+
+    if (viewer === 'buyer') {
+      chatMarkRead('');
+    }
+  } catch (error) {
+    chatSetSendState(
+      form,
+      'error',
+      error?.message || 'Message failed'
+    );
+  } finally {
+    form.dataset.busy = '0';
+    if (button) button.disabled = false;
+  }
+}
+
+async function chatPollOnce() {
+  const buyerThread = document.getElementById('buyerChatThread');
+  const adminThread = document.getElementById('adminChatThread');
+  const adminInbox = document.getElementById('adminChatInbox');
+
+  if (!buyerThread && !adminThread && !adminInbox) return;
+
+  if (chatPollBusy) return;
+  chatPollBusy = true;
+
+  const isAdmin = !!adminInbox || !!adminThread;
+  const selectedUser = adminThread
+    ? (adminThread.dataset.chatUser || '')
+    : '';
+
+  const thread = adminThread || buyerThread || null;
+  const previousLastId = thread?.dataset.lastMessageId || '';
+  const previousUpdated = thread?.dataset.lastUpdated || '';
+
+  if (document.visibilityState === 'visible') {
+    chatSetLiveStatus('syncing');
+  }
+
+  try {
+    const url = new URL('/index.php', window.location.origin);
+    url.searchParams.set('action', 'chat_poll');
+
+    if (selectedUser) {
+      url.searchParams.set('user', selectedUser);
+    }
+
+    const response = await fetch(url.toString(), {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'Accept':'application/json'}
+    });
+
+    if (response.status === 401) {
+      chatSetLiveStatus('offline');
+      chatShowToast('Chat session expired', 'Please sign in again.');
+      return;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json')
+      ? await response.json()
+      : null;
+
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'Chat sync failed.');
+    }
+
+    const conversation = payload.conversation || {
+      messages: [],
+      updated_at: ''
+    };
+
+    const messages = Array.isArray(conversation.messages)
+      ? conversation.messages
+      : [];
+
+    const newLastId = messages.length
+      ? String(messages[messages.length - 1].id || '')
+      : '';
+
+    const changed = newLastId !== previousLastId ||
+      String(conversation.updated_at || '') !== previousUpdated;
+
+    if (changed && thread) {
+      const newest = messages[messages.length - 1];
+      const incoming =
+        newest &&
+        previousLastId &&
+        String(newest.id || '') !== previousLastId &&
+        newest.sender_type !== chatViewer;
+
+      const nearBottom = chatIsNearBottom(thread);
+
+      chatRenderMessages(
+        thread,
+        conversation,
+        isAdmin ? 'admin' : 'buyer',
+        nearBottom
+      );
+
+      if (incoming) {
+        if (isAdmin) {
+          chatShowToast(
+            'New buyer message',
+            '@' + String(selectedUser || conversation.username || 'buyer')
+          );
+        } else {
+          chatShowToast(
+            newest.sender_name || 'Administrator',
+            newest.message || 'New message'
+          );
+        }
+
+        chatPlayIncomingTone();
+        chatVibrateIncoming();
+      }
+
+      if (
+        document.visibilityState === 'visible' &&
+        nearBottom &&
+        String(newest?.sender_type || '') !== chatViewer
+      ) {
+        await chatMarkRead(
+          isAdmin ? selectedUser : <?= json_encode(is_user() ? ($_SESSION['buyer_username'] ?? '') : '') ?>
+        );
+      }
+    }
+
+    if (isAdmin && adminInbox) {
+      const previousConversationIds = new Set(
+        Array.from(adminInbox.querySelectorAll('[data-chat-user]'))
+          .map(el => el.getAttribute('data-chat-user'))
+          .filter(Boolean)
+      );
+
+      chatRenderInbox(payload.conversations || [], selectedUser);
+
+      const newUnreadConversation = (payload.conversations || []).find((conv) => {
+        const msgs = Array.isArray(conv.messages) ? conv.messages : [];
+        return msgs.some(m => m.sender_type === 'buyer' && !m.read_by_admin) &&
+          !previousConversationIds.has(String(conv.username || '').toLowerCase());
+      });
+
+      if (newUnreadConversation) {
+        chatShowToast(
+          'New conversation',
+          '@' + String(newUnreadConversation.username || 'buyer')
+        );
+        chatPlayIncomingTone();
+        chatVibrateIncoming();
+      }
+    }
+
+    chatSetLiveStatus('live');
+    chatLastServerUpdate = String(payload.server_time || '');
+  } catch (error) {
+    chatSetLiveStatus('offline');
+  } finally {
+    chatPollBusy = false;
+  }
+}
+
+function scheduleChatPoll() {
+  if (chatPollTimer) clearTimeout(chatPollTimer);
+
+  chatPollTimer = window.setTimeout(async () => {
+    await chatPollOnce();
+    scheduleChatPoll();
+  }, document.visibilityState === 'visible' ? 2200 : 6000);
+}
+
 function initEnhancedChat() {
-  const forms = [document.getElementById('buyerChatForm'), document.getElementById('adminChatForm')].filter(Boolean);
+  const forms = [
+    document.getElementById('buyerChatForm'),
+    document.getElementById('adminChatForm')
+  ].filter(Boolean);
 
   for (const form of forms) {
     const textarea = form.querySelector('textarea[name="message"]');
@@ -2856,16 +3137,23 @@ function initEnhancedChat() {
 
     if (textarea) {
       textarea.addEventListener('focus', chatUnlockSound);
+
       textarea.addEventListener('input', () => {
         chatAutoResize(textarea);
         chatUpdateCharCount(form);
       });
+
       textarea.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        if (
+          event.key === 'Enter' &&
+          !event.shiftKey &&
+          !event.isComposing
+        ) {
           event.preventDefault();
           chatSubmitForm(form);
         }
       });
+
       chatAutoResize(textarea);
       chatUpdateCharCount(form);
     }
@@ -2882,28 +3170,46 @@ function initEnhancedChat() {
     }
 
     thread?.addEventListener('scroll', () => {
-      const pill = form.closest('.chat-shell, .chat-admin-thread')?.querySelector('.chat-new-message');
-      if (pill && chatIsNearBottom(thread)) pill.hidden = true;
+      const pill = form.closest('.chat-shell, .chat-admin-thread')
+        ?.querySelector('.chat-new-message');
+
+      if (pill && chatIsNearBottom(thread)) {
+        pill.hidden = true;
+      }
     });
 
-    const pill = form.closest('.chat-shell, .chat-admin-thread')?.querySelector('.chat-new-message');
+    const pill = form.closest('.chat-shell, .chat-admin-thread')
+      ?.querySelector('.chat-new-message');
+
     if (pill) {
       pill.addEventListener('click', () => {
         pill.hidden = true;
         chatScrollBottom(thread, true);
       });
     }
-
   }
 
-  const existingThread = document.getElementById('buyerChatThread') || document.getElementById('adminChatThread');
-  if (existingThread) {
-    existingThread.dataset.lastMessageId = existingThread.querySelector('.chat-row:last-child')?.getAttribute('data-message-id') || '';
+  /* Keep existing server-rendered messages untouched until the first successful poll. */
+  const threads = [
+    document.getElementById('buyerChatThread'),
+    document.getElementById('adminChatThread')
+  ].filter(Boolean);
+
+  for (const thread of threads) {
+    const lastRow = thread.querySelector('.chat-row:last-child');
+    thread.dataset.lastMessageId = lastRow?.getAttribute('data-message-id') || '';
+    thread.dataset.lastUpdated = '';
   }
 
-  chatPoll();
-  if (chatPollTimer) clearInterval(chatPollTimer);
-  chatPollTimer = setInterval(chatPoll, 2500);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      chatUnlockSound();
+      chatPollOnce();
+    }
+  });
+
+  chatPollOnce();
+  scheduleChatPoll();
 }
 
 const products = <?= json_encode($products, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
