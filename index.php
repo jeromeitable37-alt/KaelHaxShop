@@ -2549,6 +2549,55 @@ let chatSoundContext = null;
 let adminConversationCache = [];
 let chatLastServerUpdate = '';
 
+function chatParseResponse(text) {
+  const raw = String(text ?? '').replace(/^\\uFEFF/, '').trim();
+
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    /* Recover the first complete JSON object if PHP/Vercel added extra output. */
+    const start = raw.indexOf('{');
+    if (start < 0) throw new Error('Invalid server response.');
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < raw.length; i++) {
+      const ch = raw[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = raw.slice(start, i + 1);
+          try {
+            return JSON.parse(candidate);
+          } catch (_) {
+            break;
+          }
+        }
+      }
+    }
+
+    throw new Error('Invalid JSON response from chat server.');
+  }
+}
+
 function chatEscape(value) {
   return String(value ?? '').replace(/[&<>"']/g, m => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -2923,10 +2972,8 @@ async function chatSubmitForm(form) {
       headers: {'Accept':'application/json'}
     });
 
-    const contentType = response.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json')
-      ? await response.json()
-      : null;
+    const responseText = await response.text();
+    const payload = chatParseResponse(responseText);
 
     if (!response.ok || !payload?.ok) {
       throw new Error(
@@ -3007,10 +3054,8 @@ async function chatPollOnce() {
       return;
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json')
-      ? await response.json()
-      : null;
+    const responseText = await response.text();
+    const payload = chatParseResponse(responseText);
 
     if (!response.ok || !payload?.ok) {
       throw new Error(payload?.error || 'Chat sync failed.');
@@ -3106,6 +3151,7 @@ async function chatPollOnce() {
     chatLastServerUpdate = String(payload.server_time || '');
   } catch (error) {
     chatSetLiveStatus('offline');
+    console.debug('[chat] sync error:', error?.message || error);
   } finally {
     chatPollBusy = false;
   }
