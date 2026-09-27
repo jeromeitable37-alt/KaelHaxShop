@@ -320,6 +320,8 @@ function save_settings($settings) {
     return @file_put_contents(settings_file(), json_encode($settings, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE), LOCK_EX) !== false;
 }
 
+require_once __DIR__ . '/includes/pro_upgrades.php';
+
 ensure_storefront_storage();
 $products = load_products();
 $siteContent = load_content();
@@ -1318,6 +1320,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'chat_po
     chat_json_response($response);
 }
 
+// -------------------- BUYER ORDER STATUS POLLING --------------------
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'buyer_order_status_poll') {
+    if (!is_user()) {
+        chat_json_response(['ok' => false, 'error' => 'Unauthorized.'], 401);
+    }
+
+    $username = strtolower(trim((string)($_SESSION['buyer_username'] ?? '')));
+    $guestIds = is_array($_SESSION['guest_order_ids'] ?? null) ? $_SESSION['guest_order_ids'] : [];
+    $orders = load_orders();
+    $visible = [];
+
+    foreach ($orders as $order) {
+        if (!pro_order_belongs_to_buyer($order, $username, $guestIds)) continue;
+
+        $visible[] = [
+            'id' => (string)($order['id'] ?? ''),
+            'product' => (string)($order['product'] ?? 'Order'),
+            'amount' => (string)($order['amount'] ?? ''),
+            'status' => (string)($order['status'] ?? 'pending'),
+            'created_at' => (string)($order['created_at'] ?? ''),
+            'updated_at' => (string)($order['status_updated_at'] ?? $order['reviewed_at'] ?? $order['created_at'] ?? ''),
+        ];
+    }
+
+    usort($visible, function ($a, $b) {
+        return strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''));
+    });
+
+    chat_json_response([
+        'ok' => true,
+        'orders' => array_slice($visible, 0, 25),
+        'server_time' => date('c'),
+    ]);
+}
+
 // -------------------- POST ACTIONS --------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
     if (($_POST['ajax'] ?? '') === '1') {
@@ -1715,7 +1752,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'test_
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_order_status') {
     if (!is_admin()) redirect_page('admin');
     $orderId = trim($_POST['order_id'] ?? '');
-    $status = ($_POST['status'] ?? '') === 'accepted' ? 'accepted' : (($_POST['status'] ?? '') === 'ignored' ? 'ignored' : 'pending');
+    $requestedStatus = strtolower(trim((string)($_POST['status'] ?? 'pending')));
+    $allowedStatuses = ['pending', 'accepted', 'processing', 'completed', 'ignored'];
+    $status = in_array($requestedStatus, $allowedStatuses, true) ? $requestedStatus : 'pending';
     $orders = load_orders();
     $found = false;
     $approvedOrder = null;
@@ -1725,6 +1764,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
             $wasAlreadyTelegramSent = !empty($order['telegram_accepted_sent_at']);
             $order['status'] = $status;
             $order['reviewed_at'] = date('c');
+            $order['status_updated_at'] = date('c');
             $order['reviewed_by'] = $_SESSION['admin_username'] ?? 'admin';
             if ($status === 'accepted') {
                 $approvedOrder = $order;
@@ -1845,6 +1885,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <base href="/">
 <meta name="theme-color" content="#0b0f15">
 <link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/assets/pro-upgrades.css">
 <link rel="apple-touch-icon" href="/assets/kaelhax-logo.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2008,6 +2049,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
   <?php if (is_user()): ?>
     <section class="content-head"><div class="kicker">Account</div><h1><?= e($siteContent['account_title']) ?></h1><p><?= e($siteContent['account_description']) ?></p></section>
     <div class="info-box"><div class="info-row"><span>Username</span><strong>@<?= e($_SESSION['buyer_username']) ?></strong></div><div class="info-row"><span>Display Name</span><strong><?= e($_SESSION['buyer_name']) ?></strong></div><div class="info-row"><span>Status</span><strong>Signed in</strong></div><form method="post" class="hero-actions"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="buyer"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out</button></form></div>
+    <?php pro_render_buyer_dashboard(load_orders()); ?>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card">
       <img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Buyer Account</h1><p>Login or create an account for your Project Market purchases.</p>
@@ -2106,7 +2148,9 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
         <?php endforeach; ?>
       <?php endif; ?>
 
-    <?php elseif ($tab === 'content'): ?>
+          <?php pro_render_admin_dashboard($adminOrders, $buyers, $products); ?>
+
+<?php elseif ($tab === 'content'): ?>
       <form method="post" class="admin-card"><input type="hidden" name="action" value="save_content"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><h2>Website Content Editor</h2><p>Edit the visible text of the storefront without opening the PHP code.</p>
         <div class="admin-grid">
           <?php foreach ([
@@ -2177,7 +2221,39 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
       <?php endif; ?>
       <div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
       <section class="content-head" style="margin-top:28px"><div class="kicker">History</div><h2 style="font-size:25px;margin:8px 0 0">Order History</h2></section>
-      <?php if(!$adminOrders): ?><div class="info-box">No orders have been submitted yet.</div><?php else: ?><div class="table-wrap"><table class="admin-table"><thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody><?php foreach(array_slice($adminOrders,0,50) as $o): ?><tr><td><?= e($o['id']) ?></td><td><?= e($o['buyer_name']) ?></td><td><?= e($o['product']) ?></td><td><?= e($o['amount']) ?></td><td><span class="status-pill status-<?= e($o['status']??'pending') ?>"><?= e($o['status']??'pending') ?></span></td><td><?= e(date('M d, Y g:i A',strtotime($o['created_at']??'now'))) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
+      <div class="pro-card" style="margin-top:14px">
+        <div class="pro-card-head">
+          <div><h3>Order History</h3><span>Search, filter, and move accepted orders through processing to completion.</span></div>
+          <div class="pro-tools"><input type="search" class="pro-search" data-pro-history-search placeholder="Search order, buyer, product..." aria-label="Search order history"><select class="pro-filter" data-pro-history-filter aria-label="Filter order history"><option value="all">All statuses</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="processing">Processing</option><option value="completed">Completed</option><option value="ignored">Ignored</option></select></div>
+        </div>
+        <?php if(!$adminOrders): ?>
+          <div class="info-box">No orders have been submitted yet.</div>
+        <?php else: ?>
+          <div class="table-wrap"><table class="admin-table" data-pro-history-table><thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Amount</th><th>Status</th><th>Date</th><th>Next Step</th></tr></thead><tbody>
+          <?php foreach(array_slice($adminOrders,0,80) as $o): ?>
+            <?php $historyStatus=strtolower((string)($o['status']??'pending')); ?>
+            <tr data-pro-history-row data-status="<?= e($historyStatus) ?>" data-search="<?= e(strtolower(($o['id']??'').' '.($o['buyer_name']??'').' '.($o['product']??''))) ?>">
+              <td><strong><?= e($o['id']) ?></strong></td>
+              <td><?= e($o['buyer_name']??'—') ?><?php if(!empty($o['buyer_username'])): ?><small class="muted-block">@<?= e($o['buyer_username']) ?></small><?php endif; ?></td>
+              <td><?= e($o['product']??'—') ?></td>
+              <td><?= e($o['amount']??'—') ?></td>
+              <td><span class="status-pill status-<?= e($historyStatus) ?>"><?= e(pro_status_meta($historyStatus)['label']) ?></span></td>
+              <td><?= e(!empty($o['created_at']) ? date('M d, Y g:i A',strtotime($o['created_at'])) : '—') ?></td>
+              <td>
+                <?php if($historyStatus==='accepted'): ?>
+                  <form method="post" class="pro-inline-form"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="processing"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn" type="submit">Mark Processing</button></form>
+                <?php elseif($historyStatus==='processing'): ?>
+                  <form method="post" class="pro-inline-form"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="completed"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn primary" type="submit">Mark Completed</button></form>
+                <?php elseif($historyStatus==='completed'): ?><span class="notice">Done</span>
+                <?php elseif($historyStatus==='ignored'): ?><span class="notice">Ignored</span>
+                <?php else: ?><span class="notice">Awaiting review</span><?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody></table></div>
+        <?php endif; ?>
+      </div>
+
 
     <?php elseif ($tab === 'buyers'): ?>
       <section class="admin-card"><h2>Buyer Management</h2><p>Review registered buyer accounts and enable or disable access.</p><div class="table-wrap"><table class="admin-table"><thead><tr><th>Username</th><th>Display Name</th><th>Registered</th><th>Status</th><th>Action</th></tr></thead><tbody><?php foreach($buyers as $b): $bst=($b['status']??'active'); ?><tr><td>@<?= e($b['username']) ?></td><td><?= e($b['display_name']) ?></td><td><?= e(date('M d, Y',strtotime($b['created_at']??'now'))) ?></td><td><span class="<?= $bst==='active'?'status-active':'status-disabled' ?>"><?= e(strtoupper($bst)) ?></span></td><td><form method="post"><input type="hidden" name="action" value="update_buyer_status"><input type="hidden" name="username" value="<?= e($b['username']) ?>"><input type="hidden" name="status" value="<?= $bst==='active'?'disabled':'active' ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn" type="submit"><?= $bst==='active'?'Disable':'Enable' ?></button></form></td></tr><?php endforeach; ?></tbody></table></div></section>
@@ -2303,6 +2379,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 <footer><?= e($siteContent['footer_text']) ?></footer>
 
 <div id="modalBackdrop" class="modal-backdrop"><div id="modal" class="modal"></div></div>
+<script src="/assets/pro-upgrades.js" defer></script>
 <script>
 const isAdminPortal = <?= is_admin() ? 'true' : 'false' ?>;
 let deferredInstallPrompt = null;
