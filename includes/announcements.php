@@ -145,13 +145,28 @@ function announcement_find_index($items, $id) {
     return -1;
 }
 
+function announcement_shop_url() {
+    $shop = trim((string)(defined('SHOP_URL') ? SHOP_URL : ''));
+
+    if ($shop === '') {
+        return '';
+    }
+
+    return preg_match('~^https?://~i', $shop)
+        ? $shop
+        : 'https://' . $shop;
+}
+
 function announcement_telegram_caption($item) {
     $title = e($item['title'] ?? 'Announcement');
     $message = e($item['message'] ?? '');
-    $shop = e(defined('SHOP_URL') ? SHOP_URL : '');
+    $shopUrl = announcement_shop_url();
 
     $prefix = '<b>📢 ' . $title . '</b>' . "\n\n";
-    $suffix = "\n\n<b>SHOP:</b> " . $shop;
+    $suffix = $shopUrl !== ''
+        ? "\n\n🌐 <a href=\"" . e($shopUrl) . "\">Open Live Website</a>"
+        : '';
+
     $available = 1024 - mb_strlen($prefix . $suffix);
 
     if ($available < 1) {
