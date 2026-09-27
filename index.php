@@ -1375,7 +1375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_message') {
     $messageLimit = security_rate_limit('send-message', 30, 60);
     if (!$messageLimit['allowed']) {
-        security_rate_limit_response('Too many messages sent. Please wait a moment before sending again.', 60, ($_POST['ajax'] ?? '') === '1');
+        security_rate_limit_response('Too many messages sent. Please wait a moment before sending again.', 60, ($_POST['ajax'] ?? '') === '1', (($_POST['chat_role'] ?? '') === 'admin' ? 'admin' : 'messages'));
     }
     $isAjaxChat = ($_POST['ajax'] ?? '') === '1';
     $chatRole = ($_POST['chat_role'] ?? '') === 'admin' ? 'admin' : 'buyer';
@@ -1490,7 +1490,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chat_
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_order') {
     $orderLimit = security_rate_limit('send-order', 8, 600);
     if (!$orderLimit['allowed']) {
-        security_rate_limit_response('Too many order submissions. Please wait before submitting another order.', 600);
+        security_rate_limit_response('Too many order submissions. Please wait before submitting another order.', 600, false, 'my-orders');
     }
     $slug = trim($_POST['slug'] ?? '');
     if (!isset($products[$slug])) redirect_page('shop');
@@ -1574,7 +1574,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_concern') {
     $concernLimit = security_rate_limit('send-concern', 10, 300);
     if (!$concernLimit['allowed']) {
-        security_rate_limit_response('Too many concern submissions. Please wait before sending another.', 300);
+        security_rate_limit_response('Too many concern submissions. Please wait before sending another.', 300, false, 'concerns');
     }
     $user = trim($_POST['telegram_username'] ?? '');
     $order = trim($_POST['order_id'] ?? '');
@@ -1678,7 +1678,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
     $ipLimit = security_rate_limit('admin-login-ip', 6, 600);
     $userLimit = security_rate_limit('admin-login-user', 8, 900, strtolower($username));
     if (!$ipLimit['allowed'] || !$userLimit['allowed']) {
-        security_rate_limit_response('Too many administrator login attempts. Please wait 10–15 minutes and try again.', 900);
+        security_rate_limit_response('Too many administrator login attempts. Please wait 10–15 minutes and try again.', 900, false, 'admin');
     }
 
     $hash = defined('ADMIN_PASSWORD_HASH') ? (string)ADMIN_PASSWORD_HASH : '';
