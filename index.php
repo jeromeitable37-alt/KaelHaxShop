@@ -2560,6 +2560,36 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
         <div class="field" style="margin-top:12px"><label>Payment QR Path</label><input name="payment_qr" value="<?= e($siteSettings['payment_qr']) ?>"><div class="notice">Current QR: <?= e($siteSettings['payment_qr']) ?></div><img class="payment-qr" src="<?= e($siteSettings['payment_qr']) ?>" alt="Current payment QR"></div>
         <button class="primary" type="submit">Save Settings</button>
       </form>
+       <section class="admin-card" style="margin-top:14px">
+         <h2>Administrator Password</h2>
+         <p>Change the administrator password. The new password is stored securely in Upstash.</p>
+         <form method="post" class="auth-form">
+           <input type="hidden" name="action" value="admin_change_password">
+           <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+           <div class="field">
+             <label>Current Password</label>
+             <div class="password-field-wrap">
+               <input id="adminCurrentPassword" name="current_password" type="password" required autocomplete="current-password">
+               <button type="button" class="password-toggle" data-password-toggle="adminCurrentPassword">Show</button>
+             </div>
+           </div>
+           <div class="field" style="margin-top:11px">
+             <label>New Password</label>
+             <div class="password-field-wrap">
+               <input id="adminNewPassword" name="new_password" type="password" minlength="8" required autocomplete="new-password">
+               <button type="button" class="password-toggle" data-password-toggle="adminNewPassword">Show</button>
+             </div>
+           </div>
+           <div class="field" style="margin-top:11px">
+             <label>Confirm New Password</label>
+             <div class="password-field-wrap">
+               <input id="adminConfirmPassword" name="confirm_password" type="password" minlength="8" required autocomplete="new-password">
+               <button type="button" class="password-toggle" data-password-toggle="adminConfirmPassword">Show</button>
+             </div>
+           </div>
+           <button class="primary" type="submit">Change Administrator Password</button>
+         </form>
+       </section>
     <?php endif; ?>
 
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
