@@ -50,7 +50,8 @@ function security_rate_limit($bucket, $limit, $windowSeconds, $subject = '') {
     }
 
     $identifier = security_client_identifier();
-    $rawIdentity = $bucket . '|' . $identifier . '|' . $subject;
+    $rateIdentity = $subject !== '' ? $subject : $identifier;
+    $rawIdentity = $bucket . '|' . $rateIdentity;
     $identityHash = hash('sha256', $rawIdentity);
     $key = 'kaelhax:security:rl:v1:' . $bucket . ':' . $identityHash;
 
@@ -110,7 +111,7 @@ function security_headers() {
     header('Cross-Origin-Opener-Policy: same-origin');
     header('Cross-Origin-Resource-Policy: same-origin');
     header('X-Permitted-Cross-Domain-Policies: none');
-    header('Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'');
+    header("Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'");
     header('Cache-Control: private, no-store, max-age=0, must-revalidate');
 
     $proto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? $_SERVER['REQUEST_SCHEME'] ?? ''));
