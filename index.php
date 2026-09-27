@@ -2418,6 +2418,70 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     </form>
   </section>
 
+<?php elseif ($page === 'forgot-password'): ?>
+  <?php $resetType = (($_GET['type'] ?? 'buyer') === 'admin') ? 'admin' : 'buyer'; ?>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX">
+      <h1><?= $resetType === 'admin' ? 'Admin Password Recovery' : 'Forgot Password' ?></h1>
+      <p><?= $resetType === 'admin' ? 'Enter the administrator recovery email.' : 'Enter your username or recovery email.' ?></p>
+      <form class="auth-form" method="post">
+        <input type="hidden" name="action" value="request_password_reset">
+        <input type="hidden" name="type" value="<?= e($resetType) ?>">
+        <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+        <div class="field">
+          <label><?= $resetType === 'admin' ? 'Recovery Email' : 'Username or Recovery Email' ?></label>
+          <input name="identity" <?= $resetType === 'admin' ? 'type="email"' : 'type="text"' ?> required autocomplete="<?= $resetType === 'admin' ? 'email' : 'username' ?>" placeholder="<?= $resetType === 'admin' ? 'admin@example.com' : 'username or email' ?>">
+        </div>
+        <button class="primary" type="submit">Send Reset Link</button>
+        <a class="auth-recovery-link" href="index.php?page=<?= $resetType === 'admin' ? 'admin' : 'account' ?>">← Back to Login</a>
+      </form>
+      <div class="notice">For security, the page always shows the same response whether an account exists or not.</div>
+    </div>
+  </div>
+
+<?php elseif ($page === 'reset-password'): ?>
+  <?php
+    $resetType = (($_GET['type'] ?? 'buyer') === 'admin') ? 'admin' : 'buyer';
+    $resetToken = trim((string)($_GET['token'] ?? ''));
+    $resetMatch = $resetType === 'admin'
+      ? kh_find_admin_password_reset($resetToken)
+      : kh_find_password_reset($resetToken);
+  ?>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX">
+      <?php if (!$resetMatch): ?>
+        <h1>Reset Link Expired</h1>
+        <p>This password reset link is invalid or has expired.</p>
+        <a class="primary" style="display:block;text-align:center" href="index.php?page=forgot-password&type=<?= e($resetType) ?>">Request a New Link</a>
+      <?php else: ?>
+        <h1><?= $resetType === 'admin' ? 'Reset Administrator Password' : 'Set New Password' ?></h1>
+        <p>Create a new password for your account.</p>
+        <form class="auth-form" method="post">
+          <input type="hidden" name="action" value="reset_password">
+          <input type="hidden" name="type" value="<?= e($resetType) ?>">
+          <input type="hidden" name="token" value="<?= e($resetToken) ?>">
+          <div class="field">
+            <label>New Password</label>
+            <div class="password-field-wrap">
+              <input id="resetNewPassword" name="new_password" type="password" minlength="<?= $resetType === 'admin' ? '8' : '6' ?>" required autocomplete="new-password">
+              <button type="button" class="password-toggle" data-password-toggle="resetNewPassword">Show</button>
+            </div>
+          </div>
+          <div class="field" style="margin-top:11px">
+            <label>Confirm New Password</label>
+            <div class="password-field-wrap">
+              <input id="resetConfirmPassword" name="confirm_password" type="password" minlength="<?= $resetType === 'admin' ? '8' : '6' ?>" required autocomplete="new-password">
+              <button type="button" class="password-toggle" data-password-toggle="resetConfirmPassword">Show</button>
+            </div>
+          </div>
+          <button class="primary" type="submit">Reset Password</button>
+        </form>
+      <?php endif; ?>
+    </div>
+  </div>
+
 <?php elseif ($page === 'account'): ?>
   <?php if (is_user()): ?>
     <section class="content-head"><div class="kicker">Account</div><h1><?= e($siteContent['account_title']) ?></h1><p><?= e($siteContent['account_description']) ?></p></section>
