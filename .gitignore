@@ -1,4 +1,9 @@
-
 receipts/*
 data/users.json
 data/orders.json
+data/chats.json
+.env
+.env.*
+!.env.example
+.vercel/
+data/admin.json
