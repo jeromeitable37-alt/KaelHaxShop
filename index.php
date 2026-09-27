@@ -1279,6 +1279,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'admin_o
 
 // -------------------- REAL-TIME CHAT POLLING ENDPOINT --------------------
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'chat_poll') {
+    $chatPollLimit = security_rate_limit('chat-poll', 120, 60);
+    if (!$chatPollLimit['allowed']) {
+        chat_json_response(['ok'=>false,'error'=>'Rate limit reached. Please wait a moment.','retry_after'=>60], 429);
+    }
     $requestedRole = ($_GET['role'] ?? '') === 'admin' ? 'admin' : 'buyer';
 
     if ($requestedRole === 'admin') {
@@ -1355,6 +1359,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'buyer_o
     ]);
 }
 
+require_once __DIR__ . '/includes/security.php';
+
+security_headers();
+
 // -------------------- POST ACTIONS --------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
     if (($_POST['ajax'] ?? '') === '1') {
@@ -1365,6 +1373,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_ok()) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_message') {
+    $messageLimit = security_rate_limit('send-message', 30, 60);
+    if (!$messageLimit['allowed']) {
+        security_rate_limit_response('Too many messages sent. Please wait a moment before sending again.', 60, ($_POST['ajax'] ?? '') === '1');
+    }
     $isAjaxChat = ($_POST['ajax'] ?? '') === '1';
     $chatRole = ($_POST['chat_role'] ?? '') === 'admin' ? 'admin' : 'buyer';
 
@@ -1476,6 +1488,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chat_
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_order') {
+    $orderLimit = security_rate_limit('send-order', 8, 600);
+    if (!$orderLimit['allowed']) {
+        security_rate_limit_response('Too many order submissions. Please wait before submitting another order.', 600);
+    }
     $slug = trim($_POST['slug'] ?? '');
     if (!isset($products[$slug])) redirect_page('shop');
     $p = $products[$slug];
@@ -1556,6 +1572,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_concern') {
+    $concernLimit = security_rate_limit('send-concern', 10, 300);
+    if (!$concernLimit['allowed']) {
+        security_rate_limit_response('Too many concern submissions. Please wait before sending another.', 300);
+    }
     $user = trim($_POST['telegram_username'] ?? '');
     $order = trim($_POST['order_id'] ?? '');
     $message = trim($_POST['message'] ?? '');
@@ -1578,6 +1598,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer_register') {
+    $registerLimit = security_rate_limit('buyer-register', 5, 3600);
+    if (!$registerLimit['allowed']) {
+        security_rate_limit_response('Too many registration attempts. Please wait before creating another account.', 3600);
+    }
     if (empty($siteSettings['registration_enabled'])) { $_SESSION['flash']=['type'=>'error','msg'=>'Buyer registration is currently disabled.']; redirect_page('account'); }
     $username = strtolower(trim($_POST['username'] ?? ''));
     $display = trim($_POST['display_name'] ?? '');
@@ -1601,6 +1625,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
         'status' => 'active',
     ];
     save_users($users);
+    if (password_needs_rehash((string)($matched['password'] ?? ''), PASSWORD_DEFAULT)) {
+        $users = load_users();
+        foreach ($users as &$rehashUser) {
+            if (strcasecmp((string)($rehashUser['username'] ?? ''), $matched['username'] ?? '') === 0) {
+                $rehashUser['password'] = password_hash($password, PASSWORD_DEFAULT);
+                break;
+            }
+        }
+        unset($rehashUser);
+        save_users($users);
+    }
+
     session_regenerate_id(true);
     $_SESSION['buyer_logged_in'] = true;
     $_SESSION['buyer_username'] = $username;
@@ -1610,6 +1646,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer_login') {
+    $loginUsername = strtolower(trim((string)($_POST['username'] ?? '')));
+    $loginIpLimit = security_rate_limit('buyer-login-ip', 10, 600);
+    $loginUserLimit = security_rate_limit('buyer-login-user', 10, 600, $loginUsername);
+    if (!$loginIpLimit['allowed'] || !$loginUserLimit['allowed']) {
+        security_rate_limit_response('Too many login attempts. Please wait a few minutes and try again.', 600);
+    }
     $username = strtolower(trim($_POST['username'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
     $users = load_users();
@@ -1630,15 +1672,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin_login') {
-    $username = trim($_POST['username'] ?? '');
+    $username = trim((string)($_POST['username'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
-    if (hash_equals((string)ADMIN_USERNAME, $username) && hash_equals((string)ADMIN_PASSWORD, $password)) {
+
+    $ipLimit = security_rate_limit('admin-login-ip', 6, 600);
+    $userLimit = security_rate_limit('admin-login-user', 8, 900, strtolower($username));
+    if (!$ipLimit['allowed'] || !$userLimit['allowed']) {
+        security_rate_limit_response('Too many administrator login attempts. Please wait 10–15 minutes and try again.', 900);
+    }
+
+    $hash = defined('ADMIN_PASSWORD_HASH') ? (string)ADMIN_PASSWORD_HASH : '';
+    $validUser = hash_equals((string)ADMIN_USERNAME, $username);
+    $validPassword = $hash !== '' && password_verify($password, $hash);
+
+    if ($validUser && $validPassword) {
         session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
         $_SESSION['admin_username'] = ADMIN_USERNAME;
         $_SESSION['flash'] = ['type'=>'success','msg'=>'Administrator login successful.'];
         redirect_page('admin');
     }
+
     $_SESSION['flash'] = ['type'=>'error','msg'=>'Incorrect administrator username or password.'];
     redirect_page('admin');
 }
@@ -1886,6 +1940,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <meta name="theme-color" content="#0b0f15">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/pro-upgrades.css">
+<link rel="stylesheet" href="/assets/security.css">
 <link rel="apple-touch-icon" href="/assets/kaelhax-logo.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2054,8 +2109,8 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <div class="auth-shell"><div class="auth-card">
       <img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Buyer Account</h1><p>Login or create an account for your Project Market purchases.</p>
       <div class="auth-tabs"><button id="tabLogin" class="active" onclick="switchAuth('login')">Login</button><?php if (!empty($siteSettings['registration_enabled'])): ?><button id="tabRegister" onclick="switchAuth('register')">Register</button><?php endif; ?></div>
-      <form id="loginForm" class="auth-form" method="post"><input type="hidden" name="action" value="buyer_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div><button class="primary">Login</button></form>
-      <form id="registerForm" class="auth-form" method="post" style="display:<?= !empty($siteSettings['registration_enabled']) ? 'none' : 'none' ?>"><input type="hidden" name="action" value="buyer_register"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Username</label><input name="username" pattern="[A-Za-z0-9_\.]{3,32}" required></div><div class="field" style="margin-top:11px"><label>Display Name</label><input name="display_name" required></div><div class="field" style="margin-top:11px"><label>Password</label><input name="password" type="password" minlength="6" required></div><button class="primary">Create Account</button></form>
+      <form id="loginForm" class="auth-form" method="post"><input type="hidden" name="action" value="buyer_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label<div class="password-field-wrap"><input id="loginPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="loginPassword">Show</button></div></div><button class="primary">Login</button></form>
+      <form id="registerForm" class="auth-form" method="post" style="display:<?= !empty($siteSettings['registration_enabled']) ? 'none' : 'none' ?>"><input type="hidden" name="action" value="buyer_register"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Username</label><input name="username" pattern="[A-Za-z0-9_\.]{3,32}" required></div><div class="field" style="margin-top:11px"><label>Display Name</label><input name="display_name" required></div><div class="field" style="margin-top:11px"><label>Password</label<div class="password-field-wrap"><input id="registerPassword" name="password" type="password" minlength="6" required><button type="button" class="password-toggle" data-password-toggle="registerPassword">Show</button></div></div><button class="primary">Create Account</button></form>
     </div></div>
   <?php endif; ?>
 
@@ -2366,7 +2421,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
-      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div><button class="primary">Administrator Login</button><div class="notice">Credentials come from config.php or environment variables. Defaults are admin / admin123 until changed.</div></form>
+      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label<div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Credentials come from config.php or environment variables. Defaults are admin / admin123 until changed.</div></form>
     </div></div>
   <?php endif; ?>
 <?php else: ?>
@@ -2380,6 +2435,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 
 <div id="modalBackdrop" class="modal-backdrop"><div id="modal" class="modal"></div></div>
 <script src="/assets/pro-upgrades.js" defer></script>
+<script src="/assets/security.js" defer></script>
 <script>
 const isAdminPortal = <?= is_admin() ? 'true' : 'false' ?>;
 let deferredInstallPrompt = null;
