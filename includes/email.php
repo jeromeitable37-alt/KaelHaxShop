@@ -245,3 +245,129 @@ function kh_send_password_reset_email($reset) {
         $text
     );
 }
+
+
+function kh_create_admin_password_reset($email) {
+    $email = strtolower(trim((string)$email));
+
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return null;
+    }
+
+    $account = load_admin_account();
+
+    if (!$account || empty($account['recovery_email'])) {
+        return null;
+    }
+
+    if (strcasecmp((string)$account['recovery_email'], $email) !== 0) {
+        return null;
+    }
+
+    $token = bin2hex(random_bytes(32));
+
+    $account['password_reset'] = [
+        'token_hash' => hash('sha256', $token),
+        'expires_at' => time() + 1800,
+        'requested_at' => date('c'),
+    ];
+
+    if (!save_admin_account($account)) {
+        return null;
+    }
+
+    return [
+        'token' => $token,
+        'email' => (string)$account['recovery_email'],
+        'username' => (string)$account['username'],
+        'display_name' => 'Administrator',
+    ];
+}
+
+function kh_find_admin_password_reset($token) {
+    $token = trim((string)$token);
+
+    if ($token === '' || !preg_match('/^[a-f0-9]{64}$/i', $token)) {
+        return null;
+    }
+
+    $account = load_admin_account();
+    $reset = is_array($account['password_reset'] ?? null)
+        ? $account['password_reset']
+        : null;
+
+    if (!$account || !$reset) {
+        return null;
+    }
+
+    $tokenHash = hash('sha256', $token);
+
+    if (!hash_equals((string)($reset['token_hash'] ?? ''), $tokenHash)) {
+        return null;
+    }
+
+    $expires = (int)($reset['expires_at'] ?? 0);
+
+    if ($expires < time()) {
+        unset($account['password_reset']);
+        save_admin_account($account);
+        return null;
+    }
+
+    return [
+        'account' => $account,
+        'expires_at' => $expires,
+    ];
+}
+
+function kh_consume_admin_password_reset($token, $newPassword) {
+    $match = kh_find_admin_password_reset($token);
+
+    if (!$match) {
+        return [false, 'This administrator password reset link is invalid or has expired.'];
+    }
+
+    $account = $match['account'];
+
+    if (password_verify($newPassword, (string)($account['password_hash'] ?? ''))) {
+        return [false, 'New administrator password must be different from the current password.'];
+    }
+
+    $account['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+    $account['updated_at'] = date('c');
+    unset($account['password_reset']);
+
+    if (!save_admin_account($account)) {
+        return [false, 'Unable to save the new administrator password. Please try again.'];
+    }
+
+    return [true, (string)($account['username'] ?? '')];
+}
+
+function kh_send_admin_password_reset_email($reset) {
+    $baseUrl = kh_app_public_url();
+
+    if ($baseUrl === '') {
+        return [false, 'APP_PUBLIC_URL is not configured.'];
+    }
+
+    $resetUrl = $baseUrl . '/index.php?page=reset-password&type=admin&token=' . rawurlencode((string)$reset['token']);
+
+    $html = '<!doctype html><html><body style="font-family:Arial,sans-serif;background:#0b0f15;color:#edf2f8;padding:24px">' .
+        '<div style="max-width:560px;margin:auto;background:#151b24;border:1px solid #293341;border-radius:16px;padding:24px">' .
+        '<h2 style="margin:0 0 10px">Administrator Password Reset</h2>' .
+        '<p style="color:#b4bfcd">A password reset was requested for the administrator account.</p>' .
+        '<p style="color:#b4bfcd">This link expires in 30 minutes and can be used once.</p>' .
+        '<p><a href="' . kh_html_escape($resetUrl) . '" style="display:inline-block;background:#70a6ff;color:#07101a;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:700">Reset Administrator Password</a></p>' .
+        '<p style="font-size:12px;color:#758091;line-height:1.5">If you did not request this, you can safely ignore this email.</p>' .
+        '</div></body></html>';
+
+    $text = "A password reset was requested for the administrator account.\n\nReset your password here:\n{$resetUrl}\n\nThis link expires in 30 minutes and can be used once.\n\nIf you did not request this, you can ignore this email.";
+
+    return kh_send_email(
+        (string)$reset['email'],
+        'KAELHAX Administrator Password Reset',
+        $html,
+        $text
+    );
+}
