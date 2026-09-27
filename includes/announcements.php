@@ -13,6 +13,32 @@ function announcements_file() {
     return __DIR__ . '/../data/announcements.json';
 }
 
+function announcement_banner_path($item = null) {
+    $default = 'assets/announcement-banner.jpg';
+
+    if (!is_array($item)) {
+        return $default;
+    }
+
+    $path = trim((string)($item['banner'] ?? ''));
+
+    return $path !== '' ? $path : $default;
+}
+
+function announcement_public_url($path) {
+    $base = defined('SHOP_URL') ? trim((string)SHOP_URL) : '';
+
+    if ($base === '') {
+        return '';
+    }
+
+    if (!preg_match('~^https?://~i', $base)) {
+        $base = 'https://' . $base;
+    }
+
+    return rtrim($base, '/') . '/' . ltrim((string)$path, '/');
+}
+
 function ensure_announcements_file() {
     $dir = dirname(announcements_file());
 
@@ -119,10 +145,28 @@ function announcement_find_index($items, $id) {
     return -1;
 }
 
+function announcement_telegram_caption($item) {
+    $title = e($item['title'] ?? 'Announcement');
+    $message = e($item['message'] ?? '');
+    $shop = e(defined('SHOP_URL') ? SHOP_URL : '');
+
+    $prefix = '<b>📢 ' . $title . '</b>' . "\n\n";
+    $suffix = "\n\n<b>SHOP:</b> " . $shop;
+    $available = 1024 - mb_strlen($prefix . $suffix);
+
+    if ($available < 1) {
+        $available = 1;
+    }
+
+    if (mb_strlen($message) > $available) {
+        $message = mb_substr($message, 0, max(0, $available - 1)) . '…';
+    }
+
+    return $prefix . $message . $suffix;
+}
+
 function announcement_telegram_message($item) {
-    return '<b>📢 ' . e($item['title']) . '</b>' . "\n\n" .
-        e($item['message']) . "\n\n" .
-        '<b>SHOP:</b> ' . e(defined('SHOP_URL') ? SHOP_URL : '');
+    return announcement_telegram_caption($item);
 }
 
 function telegram_send_announcement($item) {
@@ -130,15 +174,22 @@ function telegram_send_announcement($item) {
         return [false, 'Telegram is not configured or is currently disabled.'];
     }
 
-    [$ok, $result] = telegram_request('sendMessage', [
+    $photoUrl = announcement_public_url(announcement_banner_path($item));
+
+    if ($photoUrl === '') {
+        return [false, 'Announcement banner URL is not configured.'];
+    }
+
+    [$ok, $result] = telegram_request('sendPhoto', [
         'chat_id' => TELEGRAM_CHAT_ID,
-        'text' => announcement_telegram_message($item),
+        'photo' => $photoUrl,
+        'caption' => announcement_telegram_caption($item),
         'parse_mode' => 'HTML',
-        'disable_web_page_preview' => true,
+        'show_caption_above_media' => true,
     ]);
 
     return [
         $ok,
-        $ok ? 'OK' : (is_string($result) ? $result : 'Telegram rejected the announcement.'),
+        $ok ? 'OK' : (is_string($result) ? $result : 'Telegram rejected the announcement banner.'),
     ];
 }
