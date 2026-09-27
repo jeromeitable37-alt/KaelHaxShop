@@ -1,0 +1,6 @@
+/* KAELHAX login/security UI additions */
+.password-field-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}
+.password-field-wrap input{min-width:0}
+.password-toggle{border:1px solid var(--line);background:#141c25;color:#b9c6d5;border-radius:10px;padding:9px 11px;font-size:10px;font-weight:900;min-width:50px}
+.password-toggle:hover{border-color:#45627f;color:#fff}
+@media(max-width:390px){.password-toggle{padding:9px 9px;font-size:9px}}
