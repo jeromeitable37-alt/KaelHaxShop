@@ -302,7 +302,22 @@ function load_products() {
     ensure_storefront_storage();
     global $defaultProducts;
     $data = read_json_file(products_file(), $defaultProducts);
-    return $data ?: $defaultProducts;
+    if (!is_array($data) || !$data) return $defaultProducts;
+
+    /*
+     * Merge built-in product defaults so additive fields such as access_link
+     * remain available for existing data/products.json files created before
+     * the field was added.
+     */
+    foreach ($data as $slug => &$product) {
+        if (!is_array($product)) $product = [];
+        if (isset($defaultProducts[$slug]) && is_array($defaultProducts[$slug])) {
+            $product = array_merge($defaultProducts[$slug], $product);
+        }
+    }
+    unset($product);
+
+    return $data;
 }
 function save_products($products) {
     ensure_storefront_storage();
