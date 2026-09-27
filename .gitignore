@@ -6,3 +6,4 @@ data/chats.json
 .env.*
 !.env.example
 .vercel/
+data/admin.json
