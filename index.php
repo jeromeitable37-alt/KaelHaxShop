@@ -167,15 +167,11 @@ session_start();
  * TELEGRAM_BOT_TOKEN
  * TELEGRAM_CHAT_ID
  * TELEGRAM_CHANNEL_USERNAME
- * ADMIN_USERNAME
- * ADMIN_PASSWORD
  * SHOP_URL
  */
 if (!defined('TELEGRAM_BOT_TOKEN')) define('TELEGRAM_BOT_TOKEN', getenv('TELEGRAM_BOT_TOKEN') ?: '');
 if (!defined('TELEGRAM_CHAT_ID')) define('TELEGRAM_CHAT_ID', getenv('TELEGRAM_CHAT_ID') ?: '');
 if (!defined('TELEGRAM_CHANNEL_USERNAME')) define('TELEGRAM_CHANNEL_USERNAME', getenv('TELEGRAM_CHANNEL_USERNAME') ?: '');
-if (!defined('ADMIN_USERNAME')) define('ADMIN_USERNAME', getenv('ADMIN_USERNAME') ?: 'admin');
-if (!defined('ADMIN_PASSWORD')) define('ADMIN_PASSWORD', getenv('ADMIN_PASSWORD') ?: 'admin123');
 if (!defined('SHOP_URL')) define('SHOP_URL', getenv('SHOP_URL') ?: 'kael-hax-shop.vercel.app');
 
 $defaultProducts = [
@@ -1624,17 +1620,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
         'created_at' => date('c'),
         'status' => 'active',
     ];
-    save_users($users);
-    if (password_needs_rehash((string)($matched['password'] ?? ''), PASSWORD_DEFAULT)) {
-        $users = load_users();
-        foreach ($users as &$rehashUser) {
-            if (strcasecmp((string)($rehashUser['username'] ?? ''), $matched['username'] ?? '') === 0) {
-                $rehashUser['password'] = password_hash($password, PASSWORD_DEFAULT);
-                break;
-            }
-        }
-        unset($rehashUser);
-        save_users($users);
+    if (!save_users($users)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Unable to save the new account. Please try again.'];
+        redirect_page('account');
     }
 
     session_regenerate_id(true);
@@ -1642,6 +1630,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
     $_SESSION['buyer_username'] = $username;
     $_SESSION['buyer_name'] = $display;
     $_SESSION['flash'] = ['type'=>'success','msg'=>'Account created successfully.'];
+    redirect_page('account');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer_change_password') {
+    if (!is_user()) {
+        redirect_page('account');
+    }
+
+    $limit = security_rate_limit('buyer-change-password', 5, 600);
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many password change attempts. Please wait a few minutes and try again.', 600, false, 'account');
+    }
+
+    $current = (string)($_POST['current_password'] ?? '');
+    $new = (string)($_POST['new_password'] ?? '');
+    $confirm = (string)($_POST['confirm_password'] ?? '');
+
+    if (strlen($new) < 6) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'New password must be at least 6 characters.'];
+        redirect_page('account');
+    }
+
+    if ($new !== $confirm) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'New password and confirmation do not match.'];
+        redirect_page('account');
+    }
+
+    $username = (string)($_SESSION['buyer_username'] ?? '');
+    $users = load_users();
+    $found = null;
+    $foundIndex = -1;
+
+    foreach ($users as $i => $u) {
+        if (strcasecmp((string)($u['username'] ?? ''), $username) === 0) {
+            $found = $u;
+            $foundIndex = $i;
+            break;
+        }
+    }
+
+    if ($foundIndex < 0 || ($found['status'] ?? 'active') !== 'active') {
+        unset($_SESSION['buyer_logged_in'], $_SESSION['buyer_username'], $_SESSION['buyer_name']);
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Your account could not be verified. Please log in again.'];
+        redirect_page('account');
+    }
+
+    if (!password_verify($current, (string)($found['password'] ?? ''))) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Current password is incorrect.'];
+        redirect_page('account');
+    }
+
+    if (password_verify($new, (string)($found['password'] ?? ''))) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'New password must be different from the current password.'];
+        redirect_page('account');
+    }
+
+    $users[$foundIndex]['password'] = password_hash($new, PASSWORD_DEFAULT);
+
+    if (!save_users($users)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Unable to save your new password. Please try again.'];
+        redirect_page('account');
+    }
+
+    session_regenerate_id(true);
+    $_SESSION['buyer_logged_in'] = true;
+    $_SESSION['buyer_username'] = $found['username'];
+    $_SESSION['buyer_name'] = $found['display_name'];
+    $_SESSION['flash'] = ['type'=>'success','msg'=>'Your password was changed successfully.'];
     redirect_page('account');
 }
 
@@ -1663,6 +1719,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
         $_SESSION['flash'] = ['type'=>'error','msg'=>'Incorrect username or password.'];
         redirect_page('account');
     }
+
+    if (password_needs_rehash((string)($matched['password'] ?? ''), PASSWORD_DEFAULT)) {
+        $users = load_users();
+        foreach ($users as &$rehashUser) {
+            if (strcasecmp((string)($rehashUser['username'] ?? ''), (string)($matched['username'] ?? '')) === 0) {
+                $rehashUser['password'] = password_hash($password, PASSWORD_DEFAULT);
+                break;
+            }
+        }
+        unset($rehashUser);
+        save_users($users);
+    }
+
     session_regenerate_id(true);
     $_SESSION['buyer_logged_in'] = true;
     $_SESSION['buyer_username'] = $matched['username'];
@@ -1681,14 +1750,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
         security_rate_limit_response('Too many administrator login attempts. Please wait 10–15 minutes and try again.', 900, false, 'admin');
     }
 
-    $hash = defined('ADMIN_PASSWORD_HASH') ? (string)ADMIN_PASSWORD_HASH : '';
-    $validUser = hash_equals((string)ADMIN_USERNAME, $username);
-    $validPassword = $hash !== '' && password_verify($password, $hash);
+    $auth = admin_authenticate($username, $password);
 
-    if ($validUser && $validPassword) {
+    if (!empty($auth['ok'])) {
         session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
-        $_SESSION['admin_username'] = ADMIN_USERNAME;
+        $_SESSION['admin_username'] = $auth['username'];
         $_SESSION['flash'] = ['type'=>'success','msg'=>'Administrator login successful.'];
         redirect_page('admin');
     }
@@ -1697,6 +1764,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
     redirect_page('admin');
 }
 
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin_change_password') {
+    admin_only();
+
+    $limit = security_rate_limit('admin-change-password', 5, 600);
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many administrator password change attempts. Please wait a few minutes and try again.', 600, false, 'admin');
+    }
+
+    $current = (string)($_POST['current_password'] ?? '');
+    $new = (string)($_POST['new_password'] ?? '');
+    $confirm = (string)($_POST['confirm_password'] ?? '');
+
+    if (strlen($new) < 8) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Administrator password must be at least 8 characters.'];
+        redirect_to('index.php?page=admin&tab=settings');
+    }
+
+    if ($new !== $confirm) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'New administrator password and confirmation do not match.'];
+        redirect_to('index.php?page=admin&tab=settings');
+    }
+
+    $username = (string)($_SESSION['admin_username'] ?? '');
+    [$ok, $message] = admin_change_password($username, $current, $new);
+
+    if (!$ok) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>$message];
+        redirect_to('index.php?page=admin&tab=settings');
+    }
+
+    session_regenerate_id(true);
+    $_SESSION['admin_logged_in'] = true;
+    $_SESSION['admin_username'] = $username;
+    $_SESSION['flash'] = ['type'=>'success','msg'=>$message];
+    redirect_to('index.php?page=admin&tab=settings');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_content') {
     admin_only();
@@ -2103,7 +2207,47 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 <?php elseif ($page === 'account'): ?>
   <?php if (is_user()): ?>
     <section class="content-head"><div class="kicker">Account</div><h1><?= e($siteContent['account_title']) ?></h1><p><?= e($siteContent['account_description']) ?></p></section>
-    <div class="info-box"><div class="info-row"><span>Username</span><strong>@<?= e($_SESSION['buyer_username']) ?></strong></div><div class="info-row"><span>Display Name</span><strong><?= e($_SESSION['buyer_name']) ?></strong></div><div class="info-row"><span>Status</span><strong>Signed in</strong></div><form method="post" class="hero-actions"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="buyer"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out</button></form></div>
+    <div class="info-box">
+      <div class="info-row"><span>Username</span><strong>@<?= e($_SESSION['buyer_username']) ?></strong></div>
+      <div class="info-row"><span>Display Name</span><strong><?= e($_SESSION['buyer_name']) ?></strong></div>
+      <div class="info-row"><span>Status</span><strong>Signed in</strong></div>
+      <form method="post" class="hero-actions">
+        <input type="hidden" name="action" value="logout">
+        <input type="hidden" name="type" value="buyer">
+        <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+        <button class="logout-btn">Log Out</button>
+      </form>
+    </div>
+    <section class="info-box" style="margin-top:14px">
+      <h2 style="margin:0 0 6px;font-size:19px">Change Password</h2>
+      <p style="margin:0 0 14px;color:var(--muted);font-size:12px">Update the password for your buyer account.</p>
+      <form method="post" class="auth-form">
+        <input type="hidden" name="action" value="buyer_change_password">
+        <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+        <div class="field">
+          <label>Current Password</label>
+          <div class="password-field-wrap">
+            <input id="buyerCurrentPassword" name="current_password" type="password" required autocomplete="current-password">
+            <button type="button" class="password-toggle" data-password-toggle="buyerCurrentPassword">Show</button>
+          </div>
+        </div>
+        <div class="field" style="margin-top:11px">
+          <label>New Password</label>
+          <div class="password-field-wrap">
+            <input id="buyerNewPassword" name="new_password" type="password" minlength="6" required autocomplete="new-password">
+            <button type="button" class="password-toggle" data-password-toggle="buyerNewPassword">Show</button>
+          </div>
+        </div>
+        <div class="field" style="margin-top:11px">
+          <label>Confirm New Password</label>
+          <div class="password-field-wrap">
+            <input id="buyerConfirmPassword" name="confirm_password" type="password" minlength="6" required autocomplete="new-password">
+            <button type="button" class="password-toggle" data-password-toggle="buyerConfirmPassword">Show</button>
+          </div>
+        </div>
+        <button class="primary" type="submit">Change Password</button>
+      </form>
+    </section>
     <?php pro_render_buyer_dashboard(load_orders()); ?>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card">
@@ -2421,7 +2565,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
-      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Credentials use the configured administrator username and a bcrypt password hash. Store ADMIN_PASSWORD_HASH in Vercel Environment Variables for production.</div></form>
+      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Administrator credentials are stored securely in the database. After the first successful migration, password changes are managed from Administrator Settings.</div></form>
     </div></div>
   <?php endif; ?>
 <?php else: ?>
