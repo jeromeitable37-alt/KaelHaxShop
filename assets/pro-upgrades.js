@@ -44,7 +44,7 @@
     try{ if('vibrate' in navigator) navigator.vibrate([70,40,90]); }catch(_){}
   }
   function initBuyerStatusWatcher(){
-    if(window.isAdminPortal) return;
+    if(typeof isAdminPortal!=='undefined' && isAdminPortal) return;
     const pageMatch=/(^|&)page=/.test(location.search) || location.search==='';
     if(!pageMatch) return;
 
