@@ -2010,6 +2010,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         redirect_to('index.php?page=admin&tab=products');
     }
     $products = load_products();
+    $existingProduct = isset($products[$slug]) && is_array($products[$slug]) ? $products[$slug] : [];
+    if (!array_key_exists('access_link', $_POST)) {
+        $accessLink = trim((string)($existingProduct['access_link'] ?? ''));
+    }
     $details = array_values(array_filter(array_map('trim', preg_split('/\R/', (string)($_POST['details'] ?? ''))), function($v){ return $v !== ''; }));
     $features = array_values(array_filter(array_map('trim', preg_split('/[,\r\n]+/', (string)($_POST['features'] ?? ''))), function($v){ return $v !== ''; }));
     $tiers = [];
@@ -2658,7 +2662,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
           <div class="admin-actions"><button class="small-btn primary" type="submit">Save Product</button><?php if($editingProduct): ?><a class="small-btn" href="index.php?page=admin&tab=products">New Product</a><?php endif; ?></div>
         </form>
       </section>
-      <section class="admin-card" style="margin-top:14px"><h2>Catalog Products</h2><?php foreach($products as $p): ?><div class="product-admin-card"><div class="product-admin-top"><div><h3><?= e($p['name']) ?></h3><div class="muted-block"><?= e($p['slug']) ?> • <?= e($p['category']) ?> • <?= !empty($p['promo'])?'Promo':'Regular' ?></div></div><div class="admin-actions"><a class="small-btn" href="index.php?page=admin&tab=products&edit=<?= e($p['slug']) ?>">Edit</a><form method="post" onsubmit="return confirm('Delete this product?');"><input type="hidden" name="action" value="delete_product"><input type="hidden" name="slug" value="<?= e($p['slug']) ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn danger" type="submit">Delete</button></form></div></div></div><?php endforeach; ?></section>
+      <section class="admin-card" style="margin-top:14px"><h2>Catalog Products</h2><?php foreach($products as $p): ?><div class="product-admin-card"><div class="product-admin-top"><div><h3><?= e($p['name']) ?></h3><div class="muted-block"><?= e($p['slug']) ?> • <?= e($p['category']) ?> • <?= !empty($p['promo'])?'Promo':'Regular' ?></div></div><div class="admin-actions"><a class="small-btn primary" href="index.php?page=admin&tab=products&edit=<?= e($p['slug']) ?>">✎ Edit Product</a><form method="post" onsubmit="return confirm('Delete this product?');"><input type="hidden" name="action" value="delete_product"><input type="hidden" name="slug" value="<?= e($p['slug']) ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn danger" type="submit">Delete</button></form></div></div></div><?php endforeach; ?></section>
 
     <?php elseif ($tab === 'orders'): ?>
       <section class="content-head"><div class="kicker">Orders</div><h2 style="font-size:25px;margin:8px 0 0">Pending Orders</h2></section>
