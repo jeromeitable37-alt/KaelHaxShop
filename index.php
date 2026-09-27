@@ -1356,6 +1356,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'buyer_o
 }
 
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/announcements.php';
 
 security_headers();
 
@@ -1603,7 +1604,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
     $display = trim($_POST['display_name'] ?? '');
     $password = (string)($_POST['password'] ?? '');
     if (!preg_match('/^[a-zA-Z0-9_\.]{3,32}$/', $username) || $display === '' || strlen($password) < 6) {
-        $_SESSION['flash'] = ['type'=>'error','msg'=>'Use a valid username, display name, and password (minimum 6 characters).'];
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Use a valid username, display name, password (minimum 6 characters).'];
         redirect_page('account');
     }
     $users = load_users();
@@ -1800,6 +1801,158 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
     $_SESSION['admin_username'] = $username;
     $_SESSION['flash'] = ['type'=>'success','msg'=>$message];
     redirect_to('index.php?page=admin&tab=settings');
+}
+
+// -------------------- ANNOUNCEMENTS --------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_announcement') {
+    admin_only();
+
+    $limit = security_rate_limit('create-announcement', 20, 3600);
+
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many announcement changes. Please wait and try again.', 3600, false, 'admin');
+    }
+
+    $title = trim((string)($_POST['title'] ?? ''));
+    $message = trim((string)($_POST['message'] ?? ''));
+    $expiresInput = trim((string)($_POST['expires_at'] ?? ''));
+    $published = !empty($_POST['published']);
+    $sendTelegram = !empty($_POST['send_telegram']);
+
+    if ($title === '' || mb_strlen($title) > 120 || $message === '' || mb_strlen($message) > 5000) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement title and message are required. Title: 120 characters max; message: 5,000 characters max.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $expiresAt = '';
+
+    if ($expiresInput !== '') {
+        $expiryTimestamp = strtotime($expiresInput);
+
+        if ($expiryTimestamp === false || $expiryTimestamp <= time()) {
+            $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement expiry must be a valid future date and time.'];
+            redirect_to('index.php?page=admin&tab=announcements');
+        }
+
+        $expiresAt = date('c', $expiryTimestamp);
+    }
+
+    $announcement = [
+        'id' => 'ANN-' . strtoupper(bin2hex(random_bytes(4))),
+        'title' => $title,
+        'message' => $message,
+        'published' => $published,
+        'created_at' => date('c'),
+        'updated_at' => date('c'),
+        'expires_at' => $expiresAt,
+        'telegram_sent_at' => '',
+    ];
+
+    $items = load_announcements();
+    array_unshift($items, $announcement);
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement could not be saved. Please try again.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $flashType = 'success';
+    $flashMessage = $published ? 'Announcement published on the website.' : 'Announcement saved as a draft.';
+
+    if ($sendTelegram) {
+        [$telegramOk, $telegramMessage] = telegram_send_announcement($announcement);
+
+        if ($telegramOk) {
+            $items[0]['telegram_sent_at'] = date('c');
+            save_announcements($items);
+            $flashMessage .= ' Telegram message sent successfully.';
+        } else {
+            $flashType = 'error';
+            $flashMessage .= ' Website save succeeded, but Telegram could not be sent: ' . $telegramMessage;
+        }
+    }
+
+    $_SESSION['flash'] = ['type'=>$flashType,'msg'=>$flashMessage];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_announcement') {
+    admin_only();
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $items[$index]['published'] = !empty($_POST['published']);
+    $items[$index]['updated_at'] = date('c');
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement status could not be updated.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement status updated.'];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_announcement') {
+    admin_only();
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    array_splice($items, $index, 1);
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement could not be deleted.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement deleted.'];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_announcement_telegram') {
+    admin_only();
+
+    $limit = security_rate_limit('send-announcement-telegram', 20, 3600);
+
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many Telegram announcement sends. Please wait and try again.', 3600, false, 'admin');
+    }
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    [$ok, $message] = telegram_send_announcement($items[$index]);
+
+    if ($ok) {
+        $items[$index]['telegram_sent_at'] = date('c');
+        $items[$index]['updated_at'] = date('c');
+        save_announcements($items);
+        $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement sent to Telegram successfully.'];
+    } else {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Telegram send failed: ' . $message];
+    }
+
+    redirect_to('index.php?page=admin&tab=announcements');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_content') {
@@ -2059,7 +2212,7 @@ main{width:min(1220px,100%);margin:auto;padding:30px 24px 62px}.content-head{mar
 .shop-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.product-card{border:1px solid var(--line);background:var(--surface);border-radius:19px;overflow:hidden;box-shadow:0 12px 34px rgba(0,0,0,.16);transition:.18s transform,.18s border-color}.product-card:hover{transform:translateY(-3px);border-color:#3b4656}.product-image{aspect-ratio:16/9;background:#000;overflow:hidden}.product-image img{width:100%;height:100%;object-fit:cover;display:block}.product-info{padding:15px 16px 16px}.badges{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:6px}.badge{font-size:11px;font-weight:800;color:var(--green);border:1px solid #275f44;background:rgba(81,220,146,.04);border-radius:999px;padding:5px 8px}.badge.promo{color:var(--blue);border-color:#365078;background:rgba(114,166,255,.05)}.product-name{font-size:19px;font-weight:900;margin:0 0 10px}.product-price{font-size:16px;font-weight:900;margin:0 0 13px}.view-btn{width:100%;border:1px solid #2c3745;background:#1a222d;color:#eef2f7;border-radius:12px;padding:10px 12px;font-weight:900}
 .product-layout{display:grid;grid-template-columns:1fr 480px;gap:36px;align-items:start}.product-meta{padding-top:4px}.product-meta h1{font-size:36px;line-height:1.05;margin:8px 0 10px;letter-spacing:-.035em}.available{display:inline-flex;border:1px solid #255e43;border-radius:999px;color:var(--green);padding:5px 9px;font-size:11px;font-weight:900}.feature-pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.feature-pill{border:1px solid #275d45;color:var(--green);background:rgba(81,220,146,.05);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:900}.product-art{margin-top:235px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#000}.product-art img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}.details-panel{margin-top:16px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px}.details-panel h2{font-size:18px;margin:0 0 13px}.detail-line{color:#d7dee7;padding:7px 0;font-size:13px}.price-panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px}.price-panel h2{font-size:26px;margin:1px 0 18px}.price-list{display:grid;gap:9px}.price-item{border:1px solid var(--line);background:#101720;border-radius:14px;padding:11px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px}.price-name{font-weight:900}.stock{font-size:10px;color:#8692a1;margin-top:2px}.price-cur{font-size:10px;color:#7f8a99;margin-top:2px}.price-right{display:flex;align-items:center;gap:10px}.amount{font-weight:900;white-space:nowrap}.buy{border:0;background:#70a6ff;color:#06101a;border-radius:10px;padding:9px 12px;font-weight:900}.back-link{border:0;background:none;color:#9fabb9;padding:0;margin-bottom:18px;font-weight:800}
 .info-box{border:1px solid var(--line);background:var(--surface);border-radius:18px;padding:18px;margin-top:13px}.info-row{display:flex;justify-content:space-between;gap:18px;padding:11px 0;border-bottom:1px solid #202a36}.info-row:last-child{border-bottom:0}.info-row span{color:var(--muted)}.hero-actions{display:grid;gap:9px;margin-top:14px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field label{display:block;color:#aab5c3;font-size:11px;margin:0 0 5px}.field input,.field select,.field textarea{width:100%;background:#090e14;border:1px solid #2b3643;color:var(--text);border-radius:11px;padding:10px 11px;outline:0}.field textarea{min-height:110px;resize:vertical}.full{grid-column:1/-1}.primary{border:0;background:#70a6ff;color:#07101a;border-radius:12px;padding:11px 13px;font-weight:900;width:100%;margin-top:11px}.notice{font-size:10px;line-height:1.5;color:#758091;margin-top:9px}
-.flash{border-radius:13px;padding:12px 14px;margin-bottom:16px;border:1px solid}.flash.success{border-color:#265e44;background:rgba(81,220,146,.07);color:#9be8bc}.flash.error{border-color:#6a3542;background:rgba(255,113,136,.07);color:#ffb1bd}
+.flash{border-radius:13px;padding:12px 14px;margin-bottom:16px;border:1px solid}.flash.success{border-color:#265e44;background:rgba(81,220,146,.07);color:#9be8bc}.flash.error{border-color:#6a3542;background:rgba(255,113,136,.07);color:#ffb1bd}.announcement-stack{display:grid;gap:12px;margin:0 0 18px}.announcement-card{border:1px solid #31567f;background:linear-gradient(135deg,#152233,#101820);border-radius:16px;padding:16px;box-shadow:0 12px 34px rgba(0,0,0,.18)}.announcement-badge{display:inline-flex;border:1px solid #36567a;color:#9bc3ff;border-radius:999px;padding:5px 8px;font-size:9px;font-weight:900;letter-spacing:.08em}.announcement-card h2{margin:10px 0 7px;font-size:21px}.announcement-message{color:#d7e1ec;font-size:13px;line-height:1.6}.announcement-meta{margin-top:10px;color:#778598;font-size:10px}.announcement-admin-card{border:1px solid var(--line);background:#101720;border-radius:15px;padding:14px;margin-top:10px}.announcement-admin-card h3{margin:0;font-size:16px}.announcement-admin-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.announcement-admin-message{margin-top:10px;color:#d7dee7;font-size:12px;line-height:1.6}
 .auth-shell{min-height:calc(100vh - 72px);display:flex;align-items:center;justify-content:center;padding:28px 16px}.auth-card{width:min(460px,100%);background:linear-gradient(180deg,#151b24,#111720);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:var(--shadow)}.auth-card .auth-logo{display:block;width:58px;height:58px;border-radius:15px;object-fit:cover;border:1px solid #354151;margin:0 auto 14px}.auth-card h1{text-align:center;font-size:28px;margin:0 0 7px}.auth-card>p{text-align:center;color:var(--muted);font-size:13px;margin:0 0 18px}.auth-tabs{display:grid;grid-template-columns:1fr 1fr;background:#0c1219;padding:4px;border:1px solid var(--line);border-radius:12px;gap:4px}.auth-tabs button{border:0;background:transparent;color:#8e9aaa;border-radius:9px;padding:9px;font-weight:800}.auth-tabs button.active{background:#1c2a3b;color:#fff}.auth-form{margin-top:15px}.auth-divider{height:1px;background:#242f3c;margin:18px 0}.logout-btn{border:1px solid var(--line);background:#101720;color:#e7edf4;border-radius:11px;padding:10px 12px;font-weight:900}
 .admin-panel{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-top:15px}.stat{background:#101720;border:1px solid var(--line);border-radius:13px;padding:14px}.stat strong{display:block;font-size:21px}.stat span{display:block;color:var(--muted);font-size:11px;margin-top:3px}
 .admin-nav{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.admin-nav a{border:1px solid var(--line);background:#101720;color:#aeb8c5;border-radius:11px;padding:9px 12px;font-weight:850;font-size:12px}.admin-nav a.active{background:#213147;border-color:#31567f;color:#fff}.admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.admin-card{border:1px solid var(--line);background:var(--surface);border-radius:18px;padding:18px}.admin-card h2{font-size:19px;margin:0 0 12px}.admin-card p{color:var(--muted);font-size:12px}.admin-card .field{margin-bottom:10px}.admin-card textarea{min-height:95px}.admin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.small-btn{border:1px solid var(--line);background:#101720;color:#e7edf4;border-radius:10px;padding:8px 10px;font-weight:850;font-size:11px}.small-btn.primary{background:#70a6ff;color:#07101a;border:0}.small-btn.danger{color:#ffb1bd;border-color:#6a3542}.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:11px 0;border-bottom:1px solid #202a36}.toggle-row:last-child{border-bottom:0}.check{display:flex;align-items:center;gap:8px;color:#cbd3dd;font-size:12px}.product-admin-card{border:1px solid var(--line);background:#101720;border-radius:15px;padding:14px;margin-top:10px}.product-admin-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.product-admin-top h3{margin:0;font-size:16px}.tier-grid{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:8px}.receipt-view{display:block;max-width:260px;max-height:300px;object-fit:contain;background:#fff;border-radius:10px;margin-top:10px}.receipt-frame{width:100%;min-height:320px;border:1px solid var(--line);border-radius:12px;background:#0b1017;margin-top:10px}.muted-block{font-size:11px;color:var(--muted);line-height:1.5}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:15px}.admin-table{width:100%;border-collapse:collapse;min-width:700px}.admin-table th,.admin-table td{padding:11px 12px;border-bottom:1px solid #202a36;text-align:left;font-size:12px}.admin-table th{color:#8f9bac;font-size:10px;letter-spacing:.07em;text-transform:uppercase}.admin-table td{color:#d7dee7}.status-active{color:var(--green)}.status-disabled{color:var(--danger)}
@@ -2097,8 +2250,21 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
   <div class="drawer-note">KAELHAX • Project Market<br>Mobile-first buyer storefront</div>
 </div></aside>
 
+<?php $activeAnnouncements = load_active_announcements(); ?>
 <main>
 <?php if ($flash): ?><div class="flash <?= e($flash['type']) ?>"><?= e($flash['msg']) ?></div><?php endif; ?>
+<?php if ($activeAnnouncements): ?>
+  <section class="announcement-stack" aria-label="Website announcements">
+    <?php foreach ($activeAnnouncements as $announcement): ?>
+      <article class="announcement-card">
+        <div class="announcement-badge">📢 ANNOUNCEMENT</div>
+        <h2><?= e($announcement['title']) ?></h2>
+        <div class="announcement-message"><?= nl2br(e($announcement['message'])) ?></div>
+        <div class="announcement-meta"><?= !empty($announcement['created_at']) ? e(date('M d, Y g:i A', strtotime($announcement['created_at']))) : '' ?></div>
+      </article>
+    <?php endforeach; ?>
+  </section>
+<?php endif; ?>
 
 <?php if ($page === 'product' && $product): ?>
   <button class="back-link" onclick="location.href='index.php?page=shop'">← Back to Shop</button>
@@ -2273,7 +2439,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     ?>
     <section class="content-head"><div class="kicker">Administration</div><h1>Administrator Dashboard</h1><p>Manage website content, products, pricing, buyers, promotions, orders, Telegram, and settings.</p></section>
     <nav class="admin-nav">
-      <?php foreach ([['dashboard','Dashboard'],['content','Website Content'],['products','Products'],['orders','Orders'],['buyers','Buyers'],['messages','Messages'],['promos','Promotions'],['telegram','Telegram'],['settings','Settings']] as $nav): ?>
+      <?php foreach ([['dashboard','Dashboard'],['content','Website Content'],['products','Products'],['orders','Orders'],['buyers','Buyers'],['messages','Messages'],['announcements','Announcements'],['promos','Promotions'],['telegram','Telegram'],['settings','Settings']] as $nav): ?>
         <a class="<?= $tab === $nav[0] ? 'active' : '' ?>" href="index.php?page=admin&tab=<?= e($nav[0]) ?>"><?= e($nav[1]) ?></a>
       <?php endforeach; ?>
     </nav>
@@ -2546,6 +2712,84 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
         </section>
       </div>
 
+<?php elseif ($tab === 'announcements'): ?>
+      <?php $allAnnouncements = load_announcements(); ?>
+      <section class="admin-card">
+        <h2>Create Announcement</h2>
+        <p>Publish a message to the website and optionally send the same announcement to Telegram.</p>
+        <form method="post" class="auth-form">
+          <input type="hidden" name="action" value="create_announcement">
+          <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+          <div class="field">
+            <label>Title</label>
+            <input name="title" maxlength="120" required placeholder="Important Update">
+          </div>
+          <div class="field" style="margin-top:11px">
+            <label>Message</label>
+            <textarea name="message" maxlength="5000" required placeholder="Write your announcement..."></textarea>
+          </div>
+          <div class="field" style="margin-top:11px">
+            <label>Expires At (optional)</label>
+            <input name="expires_at" type="datetime-local">
+          </div>
+          <div class="toggle-row">
+            <label class="check"><input type="checkbox" name="published" value="1" checked> Publish on website</label>
+          </div>
+          <div class="toggle-row">
+            <label class="check"><input type="checkbox" name="send_telegram" value="1"> Send to Telegram</label>
+          </div>
+          <button class="primary" type="submit">Create Announcement</button>
+        </form>
+      </section>
+
+      <section class="admin-card" style="margin-top:14px">
+        <h2>Existing Announcements</h2>
+        <?php if (!$allAnnouncements): ?>
+          <div class="info-box"><strong>No announcements yet.</strong><div class="notice">Create your first announcement above.</div></div>
+        <?php else: ?>
+          <?php foreach ($allAnnouncements as $announcement): ?>
+            <article class="announcement-admin-card">
+              <div class="announcement-admin-top">
+                <div>
+                  <h3><?= e($announcement['title']) ?></h3>
+                  <div class="muted-block">
+                    <?= !empty($announcement['created_at']) ? e(date('M d, Y g:i A', strtotime($announcement['created_at']))) : '' ?>
+                    • <?= !empty($announcement['published']) ? 'Published' : 'Draft' ?>
+                    <?php if (!empty($announcement['expires_at'])): ?> • Expires <?= e(date('M d, Y g:i A', strtotime($announcement['expires_at']))) ?><?php endif; ?>
+                  </div>
+                </div>
+                <span class="badge <?= !empty($announcement['published']) ? '' : 'promo' ?>"><?= !empty($announcement['published']) ? 'LIVE' : 'DRAFT' ?></span>
+              </div>
+              <div class="announcement-admin-message"><?= nl2br(e($announcement['message'])) ?></div>
+              <div class="admin-actions">
+                <form method="post">
+                  <input type="hidden" name="action" value="toggle_announcement">
+                  <input type="hidden" name="id" value="<?= e($announcement['id']) ?>">
+                  <input type="hidden" name="published" value="<?= !empty($announcement['published']) ? '0' : '1' ?>">
+                  <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                  <button class="small-btn" type="submit"><?= !empty($announcement['published']) ? 'Unpublish' : 'Publish' ?></button>
+                </form>
+                <form method="post">
+                  <input type="hidden" name="action" value="send_announcement_telegram">
+                  <input type="hidden" name="id" value="<?= e($announcement['id']) ?>">
+                  <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                  <button class="small-btn" type="submit">Send to Telegram</button>
+                </form>
+                <form method="post" onsubmit="return confirm('Delete this announcement?');">
+                  <input type="hidden" name="action" value="delete_announcement">
+                  <input type="hidden" name="id" value="<?= e($announcement['id']) ?>">
+                  <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                  <button class="small-btn danger" type="submit">Delete</button>
+                </form>
+              </div>
+              <?php if (!empty($announcement['telegram_sent_at'])): ?>
+                <div class="notice">Telegram sent <?= e(date('M d, Y g:i A', strtotime($announcement['telegram_sent_at']))) ?></div>
+              <?php endif; ?>
+            </article>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </section>
+
 <?php elseif ($tab === 'promos'): ?>
       <section class="admin-card"><h2>Promotion Manager</h2><p>Products marked as Promotion appear on the public Promos page.</p><?php foreach($products as $p): ?><div class="product-admin-card"><div class="product-admin-top"><div><h3><?= e($p['name']) ?></h3><div class="muted-block">Current status: <?= !empty($p['promo'])?'PROMO':'REGULAR' ?></div></div><form method="post"><input type="hidden" name="action" value="save_product"><input type="hidden" name="slug" value="<?= e($p['slug']) ?>"><input type="hidden" name="category" value="<?= e($p['category']) ?>"><input type="hidden" name="name" value="<?= e($p['name']) ?>"><input type="hidden" name="image" value="<?= e($p['image']) ?>"><input type="hidden" name="details_title" value="<?= e($p['details_title']) ?>"><input type="hidden" name="price_title" value="<?= e($p['price_title']) ?>"><input type="hidden" name="features" value="<?= e(implode(', ',$p['features']??[])) ?>"><input type="hidden" name="details" value="<?= e(implode("\n",$p['details']??[])) ?>"><?php foreach(($p['tiers']??[]) as $i=>$t): ?><input type="hidden" name="tier_name[<?= $i ?>]" value="<?= e($t[0]) ?>"><input type="hidden" name="tier_price[<?= $i ?>]" value="<?= e($t[1]) ?>"><input type="hidden" name="tier_stock[<?= $i ?>]" value="<?= e($t[2]??'') ?>"><?php endforeach; ?><input type="hidden" name="promo" value="<?= empty($p['promo'])?'1':'' ?>"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="small-btn <?= !empty($p['promo'])?'primary':'' ?>" type="submit"><?= !empty($p['promo'])?'Remove Promo':'Mark Promo' ?></button></form></div></div><?php endforeach; ?></section>
 
@@ -2590,12 +2834,13 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
            <button class="primary" type="submit">Change Administrator Password</button>
          </form>
        </section>
+</section>
     <?php endif; ?>
 
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
-      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Administrator credentials are stored securely in the database. After the first successful migration, password changes are managed from Administrator Settings.</div></form>
+      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Administrator credentials are stored securely in the database. Set a recovery email in Administrator Settings for self-service password recovery.</div></form>
     </div></div>
   <?php endif; ?>
 <?php else: ?>
