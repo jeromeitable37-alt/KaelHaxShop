@@ -2003,6 +2003,158 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
     redirect_to('index.php?page=admin&tab=settings');
 }
 
+// -------------------- ANNOUNCEMENTS --------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_announcement') {
+    admin_only();
+
+    $limit = security_rate_limit('create-announcement', 20, 3600);
+
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many announcement changes. Please wait and try again.', 3600, false, 'admin');
+    }
+
+    $title = trim((string)($_POST['title'] ?? ''));
+    $message = trim((string)($_POST['message'] ?? ''));
+    $expiresInput = trim((string)($_POST['expires_at'] ?? ''));
+    $published = !empty($_POST['published']);
+    $sendTelegram = !empty($_POST['send_telegram']);
+
+    if ($title === '' || mb_strlen($title) > 120 || $message === '' || mb_strlen($message) > 5000) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement title and message are required. Title: 120 characters max; message: 5,000 characters max.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $expiresAt = '';
+
+    if ($expiresInput !== '') {
+        $expiryTimestamp = strtotime($expiresInput);
+
+        if ($expiryTimestamp === false || $expiryTimestamp <= time()) {
+            $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement expiry must be a valid future date and time.'];
+            redirect_to('index.php?page=admin&tab=announcements');
+        }
+
+        $expiresAt = date('c', $expiryTimestamp);
+    }
+
+    $announcement = [
+        'id' => 'ANN-' . strtoupper(bin2hex(random_bytes(4))),
+        'title' => $title,
+        'message' => $message,
+        'published' => $published,
+        'created_at' => date('c'),
+        'updated_at' => date('c'),
+        'expires_at' => $expiresAt,
+        'telegram_sent_at' => '',
+    ];
+
+    $items = load_announcements();
+    array_unshift($items, $announcement);
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement could not be saved. Please try again.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $flashType = 'success';
+    $flashMessage = $published ? 'Announcement published on the website.' : 'Announcement saved as a draft.';
+
+    if ($sendTelegram) {
+        [$telegramOk, $telegramMessage] = telegram_send_announcement($announcement);
+
+        if ($telegramOk) {
+            $items[0]['telegram_sent_at'] = date('c');
+            save_announcements($items);
+            $flashMessage .= ' Telegram message sent successfully.';
+        } else {
+            $flashType = 'error';
+            $flashMessage .= ' Website save succeeded, but Telegram could not be sent: ' . $telegramMessage;
+        }
+    }
+
+    $_SESSION['flash'] = ['type'=>$flashType,'msg'=>$flashMessage];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_announcement') {
+    admin_only();
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $items[$index]['published'] = !empty($_POST['published']);
+    $items[$index]['updated_at'] = date('c');
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement status could not be updated.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement status updated.'];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_announcement') {
+    admin_only();
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    array_splice($items, $index, 1);
+
+    if (!save_announcements($items)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement could not be deleted.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement deleted.'];
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_announcement_telegram') {
+    admin_only();
+
+    $limit = security_rate_limit('send-announcement-telegram', 20, 3600);
+
+    if (!$limit['allowed']) {
+        security_rate_limit_response('Too many Telegram announcement sends. Please wait and try again.', 3600, false, 'admin');
+    }
+
+    $id = trim((string)($_POST['id'] ?? ''));
+    $items = load_announcements();
+    $index = announcement_find_index($items, $id);
+
+    if ($index < 0) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Announcement not found.'];
+        redirect_to('index.php?page=admin&tab=announcements');
+    }
+
+    [$ok, $message] = telegram_send_announcement($items[$index]);
+
+    if ($ok) {
+        $items[$index]['telegram_sent_at'] = date('c');
+        $items[$index]['updated_at'] = date('c');
+        save_announcements($items);
+        $_SESSION['flash'] = ['type'=>'success','msg'=>'Announcement sent to Telegram successfully.'];
+    } else {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Telegram send failed: ' . $message];
+    }
+
+    redirect_to('index.php?page=admin&tab=announcements');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_content') {
     admin_only();
     $fields = [
