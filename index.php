@@ -180,6 +180,7 @@ $defaultProducts = [
         'category' => 'CODM',
         'name' => 'KAELHAX INJECTOR | CODMGR',
         'image' => 'assets/injector.jpg',
+        'access_link' => 'https://t.me/+QFSvooH4K3Q2MjE9',
         'promo' => false,
         'details_title' => '👌 INFO DETAILS 👌',
         'details' => [
@@ -202,6 +203,7 @@ $defaultProducts = [
         'category' => 'CODM',
         'name' => 'KAELHAX VIP ACCESS | CODMGR',
         'image' => 'assets/codmgr-mod.jpg',
+        'access_link' => '',
         'promo' => true,
         'features' => ['LOADER', 'MOD'],
         'details_title' => '👌 FULL DETAILS 👌',
@@ -1522,6 +1524,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_
         'buyer_name' => $name,
         'product' => $p['name'],
         'slug' => $slug,
+        'delivery_link' => trim((string)($p['access_link'] ?? '')),
+        'delivery_key' => '',
+        'delivery_released_at' => '',
         'duration' => $tier[0],
         'amount' => money($tier[1]),
         'payment_method' => strtoupper($payment ?: '—'),
@@ -1976,6 +1981,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     $slug = preg_replace('/[^a-z0-9-]/', '-', $slug);
     $slug = trim($slug, '-');
     $name = trim((string)($_POST['name'] ?? ''));
+    $accessLink = trim((string)($_POST['access_link'] ?? ''));
+    if ($accessLink !== '' && !preg_match('/^https?:\/\/[^\s]+$/i', $accessLink)) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Access Link must be a valid http:// or https:// URL.'];
+        redirect_to('index.php?page=admin&tab=products&edit=' . rawurlencode($slug));
+    }
+    if (strlen($accessLink) > 500) {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>'Access Link is too long. Maximum 500 characters.'];
+        redirect_to('index.php?page=admin&tab=products&edit=' . rawurlencode($slug));
+    }
     if ($slug === '' || $name === '') {
         $_SESSION['flash'] = ['type'=>'error','msg'=>'Product slug and name are required.'];
         redirect_to('index.php?page=admin&tab=products');
@@ -1999,6 +2013,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         'category'=>trim((string)($_POST['category'] ?? 'General')),
         'name'=>$name,
         'image'=>trim((string)($_POST['image'] ?? 'assets/kaelhax-logo.png')),
+        'access_link'=>$accessLink,
         'promo'=>!empty($_POST['promo']),
         'features'=>$features,
         'details_title'=>trim((string)($_POST['details_title'] ?? 'DETAILS')),
@@ -2066,30 +2081,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     $requestedStatus = strtolower(trim((string)($_POST['status'] ?? 'pending')));
     $allowedStatuses = ['pending', 'accepted', 'processing', 'completed', 'ignored'];
     $status = in_array($requestedStatus, $allowedStatuses, true) ? $requestedStatus : 'pending';
+    $deliveryKey = trim((string)($_POST['delivery_key'] ?? ''));
     $orders = load_orders();
     $found = false;
     $approvedOrder = null;
     $wasAlreadyTelegramSent = false;
+    $deliveryError = '';
+
     foreach ($orders as &$order) {
         if (($order['id'] ?? '') === $orderId) {
+            $found = true;
+
+            /*
+             * Acceptance is the delivery trigger.
+             * The admin enters only the per-order key. The access link is
+             * copied automatically from the product-level configuration.
+             */
+            if ($status === 'accepted') {
+                if (strlen($deliveryKey) < 1 || strlen($deliveryKey) > 500) {
+                    $deliveryError = 'Enter a valid delivery key before accepting this order (1-500 characters).';
+                    break;
+                }
+
+                $configuredLink = trim((string)($order['delivery_link'] ?? ''));
+                if ($configuredLink === '' && !empty($order['slug']) && isset($products[$order['slug']])) {
+                    $configuredLink = trim((string)($products[$order['slug']]['access_link'] ?? ''));
+                }
+
+                if ($configuredLink === '' || !preg_match('/^https?:\/\/[^\s]+$/i', $configuredLink)) {
+                    $deliveryError = 'This product has no valid Access Link configured. Set it under Admin → Products first.';
+                    break;
+                }
+
+                $order['delivery_link'] = $configuredLink;
+                $order['delivery_key'] = $deliveryKey;
+                $order['delivery_released_at'] = date('c');
+            }
+
             $wasAlreadyTelegramSent = !empty($order['telegram_accepted_sent_at']);
             $order['status'] = $status;
             $order['reviewed_at'] = date('c');
             $order['status_updated_at'] = date('c');
             $order['reviewed_by'] = $_SESSION['admin_username'] ?? 'admin';
+
             if ($status === 'accepted') {
                 $approvedOrder = $order;
             }
-            $found = true;
             break;
         }
     }
     unset($order);
+
+    if ($deliveryError !== '') {
+        $_SESSION['flash'] = ['type'=>'error','msg'=>$deliveryError];
+        $backTab = preg_replace('/[^a-z-]/', '', (string)($_POST['tab'] ?? 'orders'));
+        redirect_to('index.php?page=admin&tab=' . ($backTab ?: 'orders'));
+    }
+
     if ($found) {
         $telegramResult = null;
 
-        // Only after admin approval: send the order banner first, then the receipt.
-        // Ignored/pending orders never send the banner or receipt to Telegram.
+        // Only after admin approval: send the order banner to Telegram.
+        // The delivery key/access link stay private inside the buyer account.
         if ($status === 'accepted' && is_array($approvedOrder) && !$wasAlreadyTelegramSent) {
             $approvedCaption =
                 '<b>✅ APPROVED ORDER</b>' . "\n\n" .
@@ -2133,9 +2186,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         } elseif ($telegramResult && !$telegramResult[0]) {
             $_SESSION['flash'] = ['type'=>'error','msg'=>'Order ' . $orderId . ' marked as ACCEPTED. ' . $telegramResult[1]];
         } elseif ($status === 'accepted' && $wasAlreadyTelegramSent) {
-            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' is already accepted and has already been sent to Telegram.'];
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' is already accepted. Delivery is available in the buyer account.'];
         } elseif ($status === 'accepted') {
-            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' accepted. Banner sent to Telegram; payment receipt remains available in Admin.'];
+            $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' accepted and delivered to the buyer account.'];
         } else {
             $_SESSION['flash'] = ['type'=>'success','msg'=>'Order ' . $orderId . ' marked as ' . strtoupper($status) . '.'];
         }
@@ -2230,6 +2283,13 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
 @media(max-width:980px){.shop-grid{grid-template-columns:repeat(2,1fr)}.product-layout{grid-template-columns:1fr;gap:18px}.product-art{margin-top:18px}.chat-admin-layout{grid-template-columns:1fr}.chat-inbox-list{max-height:260px}.chat-admin-thread .chat-compose{margin:0 -18px -18px}.chat-admin-thread .chat-thread{margin:0 -18px}}
 @media(max-width:700px){.chat-shell{border-radius:16px}.chat-thread{min-height:300px;padding:12px}.chat-bubble{max-width:88%}.chat-compose-row{grid-template-columns:1fr}.chat-send{width:100%;min-width:0}.chat-admin-thread .chat-header{margin:-16px -15px 0}.chat-admin-thread .chat-thread{margin:0 -15px}.chat-admin-thread .chat-compose{margin:0 -15px -16px}.site-header{height:80px}.header-inner{padding:0 16px}.brand-logo{width:40px;height:40px}.brand-title{font-size:16px}.drawer{top:80px}.menu-backdrop{inset:80px 0 0}main{padding:23px 14px 49px}.content-head{margin-bottom:18px}.content-head h1{font-size:34px}.content-head p{font-size:14px}.shop-grid{grid-template-columns:1fr;gap:14px}.product-card{border-radius:19px}.product-info{padding:16px 14px 15px}.product-name{font-size:21px}.product-price{font-size:20px}.view-btn{padding:12px;font-size:17px}.product-meta h1{font-size:30px}.product-layout{gap:8px}.product-art{margin-top:17px;border-radius:15px}.price-panel{padding:16px;border-radius:17px}.price-panel h2{font-size:24px}.price-item{padding:12px 11px}.price-right{gap:8px}.amount{font-size:14px}.buy{padding:9px 10px}.details-panel{padding:16px}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.auth-shell{padding:18px 13px;min-height:calc(100vh - 80px);align-items:center}.auth-card{padding:19px 15px;border-radius:18px}.auth-card h1{font-size:26px}.admin-panel{grid-template-columns:1fr}.drawer-inner{padding:18px 15px}}
 @media(max-width:390px){.brand-title small{display:none}.menu{padding:9px 11px}.menu span{font-size:14px}.drawer-title{font-size:21px}.product-name{font-size:20px}.price-item .amount{font-size:13px}.auth-card{padding:17px 13px}}
+
+/* Digital delivery */
+.delivery-card{margin-top:14px;padding:15px;border:1px solid var(--border);border-radius:16px;background:rgba(127,127,127,.06)}
+.delivery-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}.delivery-head>div{display:flex;flex-direction:column;gap:2px}.delivery-head strong{font-size:14px}.delivery-head span{font-size:11px;color:var(--muted)}.delivery-icon{font-size:21px}
+.delivery-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--border)}.delivery-row>div{min-width:0;display:flex;flex-direction:column;gap:5px}.delivery-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.delivery-link{font-weight:800;word-break:break-all}.delivery-key{font-size:13px;word-break:break-all;color:inherit}.delivery-copy{border:1px solid var(--border);background:transparent;color:inherit;border-radius:9px;padding:8px 11px;cursor:pointer;font-weight:700}.delivery-pending{opacity:.9}
+.admin-order-actions-delivery{align-items:flex-end}.delivery-accept-form{display:flex;flex:1;flex-wrap:wrap;align-items:flex-end;gap:8px}.delivery-admin-label{width:100%;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.delivery-admin-key{min-width:220px;flex:1;padding:10px 11px;border:1px solid var(--border);border-radius:10px;background:var(--input-bg,var(--card));color:inherit}.delivery-accept-form .accept{white-space:nowrap}
+@media(max-width:700px){.delivery-row{align-items:flex-start;flex-direction:column}.delivery-copy{width:100%}.delivery-accept-form{width:100%}.delivery-admin-key{min-width:0;width:100%}.delivery-accept-form .accept{width:100%}.admin-order-actions-delivery>form:not(.delivery-accept-form){width:100%}.admin-order-actions-delivery>form:not(.delivery-accept-form) .ignore{width:100%}}
 </style>
 </head>
 <body>
@@ -2307,6 +2367,21 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
       <article class="order-card">
         <div class="order-top"><div><div class="order-id"><?= e($o['id']) ?></div><div class="order-meta"><?= e($o['product']) ?><br><?= e($o['duration']) ?> • <?= e($o['amount']) ?><br>Submitted <?= e(date('M d, Y g:i A', strtotime($o['created_at'] ?? 'now'))) ?></div></div><span class="status-pill status-<?= e($o['status'] ?? 'pending') ?>"><?= e($o['status'] ?? 'pending') ?></span></div>
         <div class="order-meta">Payment: <?= e($o['payment_method'] ?? '—') ?><?php if (!empty($o['telegram_username'])): ?><br>Telegram: <?= e($o['telegram_username']) ?><?php endif; ?></div>
+        <?php $deliveryStatus = strtolower((string)($o['status'] ?? 'pending')); ?>
+        <?php if (in_array($deliveryStatus, ['accepted','processing','completed'], true) && !empty($o['delivery_link']) && !empty($o['delivery_key'])): ?>
+          <div class="delivery-card">
+            <div class="delivery-head"><span class="delivery-icon">🔐</span><div><strong>Digital Delivery</strong><span>Access is now available for this order.</span></div></div>
+            <div class="delivery-row">
+              <div><span class="delivery-label">Access Link</span><a class="delivery-link" href="<?= e($o['delivery_link']) ?>" target="_blank" rel="noopener noreferrer">Open Access ↗</a></div>
+            </div>
+            <div class="delivery-row">
+              <div><span class="delivery-label">License / Access Key</span><code class="delivery-key" id="delivery-key-<?= e($o['id']) ?>"><?= e($o['delivery_key']) ?></code></div>
+              <button type="button" class="delivery-copy" data-copy-value="<?= e($o['delivery_key']) ?>" onclick="copyDeliveryKey(this)">Copy Key</button>
+            </div>
+          </div>
+        <?php elseif (in_array($deliveryStatus, ['accepted','processing','completed'], true)): ?>
+          <div class="delivery-card delivery-pending"><div class="delivery-head"><span class="delivery-icon">⏳</span><div><strong>Delivery pending</strong><span>The order is approved, but the administrator has not released the access details yet.</span></div></div></div>
+        <?php endif; ?>
       </article>
     <?php endforeach; ?>
   <?php endif; ?>
@@ -2505,9 +2580,25 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
             <?php else: ?>
               <div class="notice">No payment receipt was attached to this order.</div>
             <?php endif; ?>
-            <div class="admin-order-actions">
-              <form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form>
-              <form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form>
+            <div class="admin-order-actions admin-order-actions-delivery">
+              <form method="post" class="delivery-accept-form">
+                <input type="hidden" name="action" value="update_order_status">
+                <input type="hidden" name="order_id" value="<?= e($o['id']) ?>">
+                <input type="hidden" name="status" value="accepted">
+                <input type="hidden" name="tab" value="orders">
+                <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                <label class="delivery-admin-label">Delivery Key</label>
+                <input class="delivery-admin-key" name="delivery_key" type="text" maxlength="500" autocomplete="off" placeholder="Type key before accepting" required>
+                <button class="accept" type="submit">✓ Accept &amp; Deliver</button>
+              </form>
+              <form method="post">
+                <input type="hidden" name="action" value="update_order_status">
+                <input type="hidden" name="order_id" value="<?= e($o['id']) ?>">
+                <input type="hidden" name="status" value="ignored">
+                <input type="hidden" name="tab" value="orders">
+                <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                <button class="ignore" type="submit">✕ Ignore</button>
+              </form>
             </div>
           </article>
         <?php endforeach; ?>
@@ -2530,13 +2621,14 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <?php elseif ($tab === 'products'): ?>
       <section class="admin-card">
         <h2><?= $editingProduct ? 'Edit Product' : 'Add Product' ?></h2><p>Create or edit catalog products and their pricing tiers. Existing buyer-side styling remains unchanged.</p>
-        <?php $ep = $editingProduct ?: ['slug'=>'','category'=>'General','name'=>'','image'=>'assets/kaelhax-logo.png','promo'=>false,'features'=>[],'details_title'=>'DETAILS','details'=>[],'price_title'=>'PRICELIST','tiers'=>[['',0,null],['',0,null],['',0,null],['',0,null]]]; ?>
+        <?php $ep = $editingProduct ?: ['slug'=>'','category'=>'General','name'=>'','image'=>'assets/kaelhax-logo.png','access_link'=>'','promo'=>false,'features'=>[],'details_title'=>'DETAILS','details'=>[],'price_title'=>'PRICELIST','tiers'=>[['',0,null],['',0,null],['',0,null],['',0,null]]]; ?>
         <form method="post"><input type="hidden" name="action" value="save_product"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
           <div class="admin-grid">
             <div class="field"><label>Slug</label><input name="slug" value="<?= e($ep['slug']) ?>" required></div>
             <div class="field"><label>Category</label><input name="category" value="<?= e($ep['category']) ?>"></div>
             <div class="field"><label>Product Name</label><input name="name" value="<?= e($ep['name']) ?>" required></div>
             <div class="field"><label>Image Path</label><input name="image" value="<?= e($ep['image']) ?>"></div>
+            <div class="field full"><label>Access Link</label><input name="access_link" type="url" value="<?= e($ep['access_link'] ?? '') ?>" placeholder="https://..."><div class="notice">This is copied automatically to accepted orders. You only enter the key during order acceptance.</div></div>
             <div class="field"><label>Details Title</label><input name="details_title" value="<?= e($ep['details_title']) ?>"></div>
             <div class="field"><label>Price Title</label><input name="price_title" value="<?= e($ep['price_title']) ?>"></div>
             <div class="field full"><label>Features (comma-separated)</label><input name="features" value="<?= e(implode(', ', $ep['features'] ?? [])) ?>"></div>
@@ -2584,7 +2676,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
       <?php else: ?>
         <div class="notice">No payment receipt was attached to this order.</div>
       <?php endif; ?>
-      <div class="admin-order-actions"><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="accept">✓ Accept</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
+      <div class="admin-order-actions admin-order-actions-delivery"><form method="post" class="delivery-accept-form"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="accepted"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><label class="delivery-admin-label">Delivery Key</label><input class="delivery-admin-key" name="delivery_key" type="text" maxlength="500" autocomplete="off" placeholder="Type key before accepting" required><button class="accept" type="submit">✓ Accept &amp; Deliver</button></form><form method="post"><input type="hidden" name="action" value="update_order_status"><input type="hidden" name="order_id" value="<?= e($o['id']) ?>"><input type="hidden" name="status" value="ignored"><input type="hidden" name="tab" value="orders"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="ignore" type="submit">✕ Ignore</button></form></div></article><?php endforeach; endif; ?>
       <section class="content-head" style="margin-top:28px"><div class="kicker">History</div><h2 style="font-size:25px;margin:8px 0 0">Order History</h2></section>
       <div class="pro-card" style="margin-top:14px">
         <div class="pro-card-head">
@@ -3926,6 +4018,17 @@ if (isAdminPortal) {
       // The regular interval continues; this just wakes the page sooner after returning.
     }
   });
+}
+
+function copyDeliveryKey(button){
+  const value=button?.dataset?.copyValue||'';
+  if(!value)return;
+  const done=()=>{const original=button.textContent;button.textContent='Copied ✓';setTimeout(()=>button.textContent=original,1400);};
+  if(navigator.clipboard?.writeText){navigator.clipboard.writeText(value).then(done).catch(()=>fallbackCopyDeliveryKey(value,done));}
+  else{fallbackCopyDeliveryKey(value,done);}
+}
+function fallbackCopyDeliveryKey(value,done){
+  const area=document.createElement('textarea');area.value=value;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();try{document.execCommand('copy');done();}finally{area.remove();}
 }
 
 </script>
