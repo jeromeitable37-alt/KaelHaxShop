@@ -2011,7 +2011,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     }
     $products = load_products();
     $details = array_values(array_filter(array_map('trim', preg_split('/\R/', (string)($_POST['details'] ?? ''))), function($v){ return $v !== ''; }));
-    $features = array_values(array_filter(array_map('trim', preg_split('/[,\R]+/', (string)($_POST['features'] ?? ''))), function($v){ return $v !== ''; }));
+    $features = array_values(array_filter(array_map('trim', preg_split('/[,\r\n]+/', (string)($_POST['features'] ?? ''))), function($v){ return $v !== ''; }));
     $tiers = [];
     for ($i=0; $i<4; $i++) {
         $tierName = trim((string)($_POST['tier_name'][$i] ?? ''));
