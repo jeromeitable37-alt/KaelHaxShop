@@ -2912,6 +2912,27 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
            <button class="primary" type="submit">Change Administrator Password</button>
          </form>
        </section>
+       <?php $adminAccountForSettings = load_admin_account(); ?>
+       <section class="admin-card" style="margin-top:14px">
+         <h2>Administrator Recovery Email</h2>
+         <p>Use this email for administrator password recovery.</p>
+         <form method="post" class="auth-form">
+           <input type="hidden" name="action" value="update_admin_recovery_email">
+           <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+           <div class="field">
+             <label>Recovery Email</label>
+             <input name="recovery_email" type="email" required autocomplete="email" value="<?= e($adminAccountForSettings['recovery_email'] ?? '') ?>" placeholder="admin@example.com">
+           </div>
+           <div class="field" style="margin-top:11px">
+             <label>Current Password</label>
+             <div class="password-field-wrap">
+               <input id="adminRecoveryEmailCurrentPassword" name="current_password" type="password" required autocomplete="current-password">
+               <button type="button" class="password-toggle" data-password-toggle="adminRecoveryEmailCurrentPassword">Show</button>
+             </div>
+           </div>
+           <button class="primary" type="submit">Save Administrator Recovery Email</button>
+         </form>
+       </section></section>
     <?php endif; ?>
 
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
