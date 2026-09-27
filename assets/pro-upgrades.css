@@ -61,3 +61,13 @@
 .pro-empty-state{text-align:center;padding:26px 12px}.pro-empty-icon{font-size:30px}.pro-empty-state h3{margin:8px 0 4px}.pro-empty-state p{margin:0 0 12px;color:var(--muted);font-size:11px}
 @media(max-width:980px){.pro-kpi-grid{grid-template-columns:repeat(2,1fr)}.pro-two-col{grid-template-columns:1fr}.pro-quick-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:700px){.pro-dashboard-header{flex-direction:column}.pro-live-badge{align-self:flex-start}.pro-kpi{padding:12px}.pro-card{padding:13px}.pro-card-head{flex-direction:column}.pro-tools{width:100%}.pro-search{width:100%;flex:1}.pro-order-row{align-items:flex-start;flex-direction:column}.pro-order-status{width:100%;display:flex;align-items:center;justify-content:space-between}.pro-quick-grid{grid-template-columns:1fr}.pro-buyer-order{grid-template-columns:1fr}.pro-buyer-order-side{justify-items:start;display:flex;align-items:center}.pro-timeline-item span{display:none}}
+
+.status-processing{color:#9bc3ff;border:1px solid #31567f;background:rgba(114,166,255,.06)}
+.status-completed{color:#d7b7ff;border:1px solid #5c4a7f;background:rgba(170,130,255,.06)}
+.pro-inline-form{margin:0}.pro-inline-form .small-btn{white-space:nowrap}
+.pro-notify-toast{position:fixed;right:18px;bottom:18px;z-index:140;width:min(390px,calc(100vw - 28px));display:grid;grid-template-columns:40px 1fr auto;gap:10px;align-items:start;padding:12px;border:1px solid #31567f;background:linear-gradient(135deg,#162333,#0f171f);border-radius:16px;box-shadow:0 22px 70px rgba(0,0,0,.46);opacity:0;transform:translateY(15px) scale(.98);pointer-events:none;transition:.22s}
+.pro-notify-toast.show{opacity:1;transform:none;pointer-events:auto}
+.pro-notify-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#1a2a3a;border:1px solid #33485f;font-size:17px}
+.pro-notify-copy strong{display:block;font-size:12px}.pro-notify-copy span{display:block;margin-top:3px;color:#aab6c5;font-size:10px;line-height:1.45}.pro-notify-copy a{display:inline-flex;margin-top:8px;font-size:9px;font-weight:900;color:#9bc3ff}
+.pro-notify-toast button{width:28px;height:28px;border-radius:9px;border:1px solid #2e3c4c;background:#141d27;color:#aeb8c6;cursor:pointer;font-size:16px;line-height:1}
+@media(max-width:700px){.pro-notify-toast{right:10px;bottom:12px;width:calc(100vw - 20px)}}
