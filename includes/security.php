@@ -81,20 +81,20 @@ function security_rate_limit($bucket, $limit, $windowSeconds, $subject = '') {
     ];
 }
 
-function security_rate_limit_response($message = 'Too many requests. Please wait and try again.', $status = 429, $ajax = false) {
+function security_rate_limit_response($message = 'Too many requests. Please wait and try again.', $retryAfter = 60, $ajax = false, $redirectPage = 'account') {
     if ($ajax && function_exists('chat_json_response')) {
         chat_json_response([
             'ok' => false,
             'error' => $message,
-            'retry_after' => (int)$status,
+            'retry_after' => max(1, (int)$retryAfter),
         ], 429);
     }
 
     http_response_code(429);
-    header('Retry-After: ' . max(1, (int)$status));
+    header('Retry-After: ' . max(1, (int)$retryAfter));
     if (function_exists('redirect_page')) {
         $_SESSION['flash'] = ['type' => 'error', 'msg' => $message];
-        redirect_page('account');
+        redirect_page($redirectPage);
     }
 
     exit;
