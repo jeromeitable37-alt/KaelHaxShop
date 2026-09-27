@@ -119,3 +119,182 @@ function security_headers() {
         header('Strict-Transport-Security: max-age=31536000');
     }
 }
+
+
+/* -------------------- ADMIN CREDENTIAL STORAGE -------------------- */
+/*
+ * Administrator credentials live in the same Upstash store used by the app.
+ * The legacy environment variables ADMIN_USERNAME / ADMIN_PASSWORD_HASH are
+ * accepted only as a one-time migration source when no admin record exists.
+ * Once the record exists, normal logins and password changes use Upstash only.
+ */
+function admin_account_key() {
+    return 'kaelhax:admin:v1';
+}
+
+function admin_account_file() {
+    return __DIR__ . '/../data/admin.json';
+}
+
+function admin_legacy_credentials() {
+    $username = function_exists('kaelhax_env')
+        ? kaelhax_env('ADMIN_USERNAME', 'admin')
+        : trim((string)(getenv('ADMIN_USERNAME') ?: 'admin'));
+
+    $hash = function_exists('kaelhax_env')
+        ? kaelhax_env('ADMIN_PASSWORD_HASH', '')
+        : trim((string)(getenv('ADMIN_PASSWORD_HASH') ?: ''));
+
+    return [
+        'username' => $username,
+        'password_hash' => $hash,
+    ];
+}
+
+function load_admin_account() {
+    if (function_exists('upstash_configured') && upstash_configured()) {
+        [$ok, $result] = upstash_request(['GET', admin_account_key()]);
+        if ($ok && is_string($result) && $result !== '') {
+            $account = json_decode($result, true);
+            if (is_array($account) && !empty($account['username']) && !empty($account['password_hash'])) {
+                return $account;
+            }
+        }
+        return null;
+    }
+
+    $file = admin_account_file();
+    if (!file_exists($file)) return null;
+
+    $json = @file_get_contents($file);
+    $account = json_decode($json ?: '', true);
+    return is_array($account) && !empty($account['username']) && !empty($account['password_hash'])
+        ? $account
+        : null;
+}
+
+function save_admin_account($account) {
+    if (!is_array($account) || empty($account['username']) || empty($account['password_hash'])) {
+        return false;
+    }
+
+    $json = json_encode($account, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) return false;
+
+    if (function_exists('upstash_configured') && upstash_configured()) {
+        [$ok] = upstash_request(['SET', admin_account_key(), $json]);
+        return $ok;
+    }
+
+    $file = admin_account_file();
+    $dir = dirname($file);
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+
+    return @file_put_contents(
+        $file,
+        json_encode($account, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        LOCK_EX
+    ) !== false;
+}
+
+function admin_authenticate($username, $password) {
+    $username = trim((string)$username);
+    $password = (string)$password;
+
+    $account = load_admin_account();
+
+    if ($account) {
+        $active = ($account['status'] ?? 'active') === 'active';
+        $validUser = hash_equals((string)$account['username'], $username);
+        $validPassword = $active && password_verify($password, (string)($account['password_hash'] ?? ''));
+
+        if ($validUser && $validPassword) {
+            if (password_needs_rehash((string)$account['password_hash'], PASSWORD_DEFAULT)) {
+                $account['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+                $account['updated_at'] = date('c');
+                save_admin_account($account);
+            }
+            return [
+                'ok' => true,
+                'username' => (string)$account['username'],
+                'source' => 'upstash',
+            ];
+        }
+
+        return ['ok' => false];
+    }
+
+    /* One-time compatibility migration from the old admin env variables. */
+    $legacy = admin_legacy_credentials();
+    $validUser = $legacy['username'] !== '' && hash_equals($legacy['username'], $username);
+    $validPassword = $legacy['password_hash'] !== '' && password_verify($password, $legacy['password_hash']);
+
+    if (!$validUser || !$validPassword) {
+        return ['ok' => false];
+    }
+
+    $account = [
+        'username' => $legacy['username'],
+        'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+        'created_at' => date('c'),
+        'updated_at' => date('c'),
+        'status' => 'active',
+    ];
+
+    $saved = save_admin_account($account);
+
+    return [
+        'ok' => true,
+        'username' => $legacy['username'],
+        'source' => $saved ? 'migrated' : 'legacy',
+    ];
+}
+
+function admin_verify_current_password($username, $password) {
+    $username = trim((string)$username);
+    $password = (string)$password;
+
+    $account = load_admin_account();
+
+    if ($account) {
+        return hash_equals((string)$account['username'], $username)
+            && ($account['status'] ?? 'active') === 'active'
+            && password_verify($password, (string)($account['password_hash'] ?? ''));
+    }
+
+    $legacy = admin_legacy_credentials();
+
+    return $legacy['username'] !== ''
+        && hash_equals($legacy['username'], $username)
+        && $legacy['password_hash'] !== ''
+        && password_verify($password, $legacy['password_hash']);
+}
+
+function admin_change_password($username, $currentPassword, $newPassword) {
+    if (!admin_verify_current_password($username, $currentPassword)) {
+        return [false, 'Current administrator password is incorrect.'];
+    }
+
+    $account = load_admin_account();
+
+    if ($account && password_verify($newPassword, (string)($account['password_hash'] ?? ''))) {
+        return [false, 'New administrator password must be different from the current password.'];
+    }
+
+    if (!$account) {
+        $account = [
+            'username' => trim((string)$username),
+            'created_at' => date('c'),
+            'status' => 'active',
+        ];
+    }
+
+    $account['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+    $account['updated_at'] = date('c');
+
+    if (!save_admin_account($account)) {
+        return [false, 'Unable to save the new administrator password. Please try again.'];
+    }
+
+    return [true, 'Administrator password changed successfully.'];
+}
