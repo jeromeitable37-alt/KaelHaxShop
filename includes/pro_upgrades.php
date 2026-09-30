@@ -12,9 +12,19 @@ function pro_amount_value($value) {
 
 function pro_order_belongs_to_buyer($order, $username, $guestIds = []) {
     if (!is_array($order)) return false;
+
     $username = strtolower(trim((string)$username));
     $owner = strtolower(trim((string)($order['buyer_username'] ?? '')));
-    if ($username !== '' && $owner !== '' && hash_equals($username, $owner)) return true;
+
+    /*
+     * For an authenticated dashboard, explicit account ownership wins.
+     * Guest session IDs are not accepted as a fallback because they can
+     * otherwise surface orders that were not assigned to the current user.
+     */
+    if ($username !== '') {
+        return $owner !== '' && hash_equals($username, $owner);
+    }
+
     $id = (string)($order['id'] ?? '');
     return $id !== '' && in_array($id, $guestIds, true);
 }
