@@ -1775,8 +1775,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'buyer
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin_login') {
-    $username = trim((string)($_POST['username'] ?? ''));
-    $password = (string)($_POST['password'] ?? '');
+    $username = trim((string)($_POST['admin_username'] ?? $_POST['username'] ?? ''));
+    $password = (string)($_POST['admin_password'] ?? $_POST['password'] ?? '');
 
     /*
      * Admin login protection: enough room for normal retries while still
@@ -2969,7 +2969,7 @@ footer{border-top:1px solid #1a222c;padding:30px 18px 44px;text-align:center;col
     <form method="post" class="hero-actions" style="margin-top:18px"><input type="hidden" name="action" value="logout"><input type="hidden" name="type" value="admin"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><button class="logout-btn">Log Out Administrator</button></form>
   <?php else: ?>
     <div class="auth-shell"><div class="auth-card"><img class="auth-logo" src="assets/kaelhax-logo.png" alt="KAELHAX"><h1>Administrator Login</h1><p>Secure access to the KAELHAX Project Market administration area.</p>
-      <form class="auth-form" method="post"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="username" required autocomplete="username"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="password" type="password" required autocomplete="current-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Administrator credentials are stored securely in the database. Set a recovery email in Administrator Settings for self-service password recovery.</div></form>
+      <form class="auth-form" method="post" autocomplete="off"><input type="hidden" name="action" value="admin_login"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><div class="field"><label>Administrator Username</label><input name="admin_username" required autocomplete="off" autocapitalize="none" spellcheck="false"></div><div class="field" style="margin-top:11px"><label>Password</label><div class="password-field-wrap"><input id="adminPassword" name="admin_password" type="password" required autocomplete="new-password"><button type="button" class="password-toggle" data-password-toggle="adminPassword">Show</button></div></div><button class="primary">Administrator Login</button><div class="notice">Administrator credentials are stored securely in the database. Set a recovery email in Administrator Settings for self-service password recovery.</div></form>
     </div></div>
   <?php endif; ?>
 <?php else: ?>
