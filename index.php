@@ -857,8 +857,21 @@ function new_order_id() {
 }
 function buyer_can_see_order($order) {
     if (is_admin()) return true;
+
+    /*
+     * Authenticated buyers must only see orders that are explicitly tied
+     * to their account. Do not fall back to browser/session guest IDs once
+     * the user is logged in, otherwise an old session could expose another
+     * order that was created without an account association.
+     */
+    if (is_user()) {
+        $owner = strtolower(trim((string)($order['buyer_username'] ?? '')));
+        $current = strtolower(trim((string)($_SESSION['buyer_username'] ?? '')));
+        return $owner !== '' && $current !== '' && hash_equals($current, $owner);
+    }
+
+    /* Guest orders are only visible from the same guest session. */
     $ids = $_SESSION['guest_order_ids'] ?? [];
-    if (!empty($order['buyer_username']) && is_user() && strtolower((string)$order['buyer_username']) === strtolower((string)($_SESSION['buyer_username'] ?? ''))) return true;
     return in_array($order['id'] ?? '', $ids, true);
 }
 function receipt_upload_error_message($code) {
