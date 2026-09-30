@@ -145,6 +145,19 @@ function admin_legacy_credentials() {
         ? kaelhax_env('ADMIN_PASSWORD_HASH', '')
         : trim((string)(getenv('ADMIN_PASSWORD_HASH') ?: ''));
 
+    /*
+     * ADMIN_PASSWORD is supported only as a migration/recovery source.
+     * It is never stored in the repository. A successful login immediately
+     * converts it into a password hash in the persistent admin account.
+     */
+    $plain = function_exists('kaelhax_env')
+        ? kaelhax_env('ADMIN_PASSWORD', '')
+        : trim((string)(getenv('ADMIN_PASSWORD') ?: ''));
+
+    if ($hash === '' && $plain !== '') {
+        $hash = password_hash($plain, PASSWORD_DEFAULT);
+    }
+
     return [
         'username' => $username,
         'password_hash' => $hash,
