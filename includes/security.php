@@ -205,7 +205,7 @@ function admin_authenticate($username, $password) {
 
     if ($account) {
         $active = ($account['status'] ?? 'active') === 'active';
-        $validUser = hash_equals((string)$account['username'], $username);
+        $validUser = strtolower((string)$account['username']) === strtolower($username);
         $validPassword = $active && password_verify($password, (string)($account['password_hash'] ?? ''));
 
         if ($validUser && $validPassword) {
@@ -221,12 +221,37 @@ function admin_authenticate($username, $password) {
             ];
         }
 
+        /*
+         * Recovery compatibility: if the persistent admin record is stale
+         * but the current Vercel legacy credentials are valid, refresh the
+         * persistent record from those credentials. This prevents a previous
+         * migrated password from locking the administrator out after an
+         * environment-variable update.
+         */
+        $legacy = admin_legacy_credentials();
+        $legacyUserOk = $legacy['username'] !== '' && strtolower($legacy['username']) === strtolower($username);
+        $legacyPasswordOk = $legacy['password_hash'] !== '' && password_verify($password, $legacy['password_hash']);
+
+        if ($legacyUserOk && $legacyPasswordOk) {
+            $account['username'] = $legacy['username'];
+            $account['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+            $account['updated_at'] = date('c');
+            $account['status'] = 'active';
+            $saved = save_admin_account($account);
+
+            return [
+                'ok' => true,
+                'username' => $legacy['username'],
+                'source' => $saved ? 'legacy-refresh' : 'legacy',
+            ];
+        }
+
         return ['ok' => false];
     }
 
     /* One-time compatibility migration from the old admin env variables. */
     $legacy = admin_legacy_credentials();
-    $validUser = $legacy['username'] !== '' && hash_equals($legacy['username'], $username);
+    $validUser = $legacy['username'] !== '' && strtolower($legacy['username']) === strtolower($username);
     $validPassword = $legacy['password_hash'] !== '' && password_verify($password, $legacy['password_hash']);
 
     if (!$validUser || !$validPassword) {
