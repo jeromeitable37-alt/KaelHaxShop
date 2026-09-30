@@ -1778,10 +1778,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin
     $username = trim((string)($_POST['username'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
 
-    $ipLimit = security_rate_limit('admin-login-ip', 6, 600);
-    $userLimit = security_rate_limit('admin-login-user', 8, 900, strtolower($username));
+    /*
+     * Admin login protection: enough room for normal retries while still
+     * limiting credential-guessing. Versioned buckets intentionally reset
+     * stale lockouts created by the previous stricter limits.
+     */
+    $ipLimit = security_rate_limit('admin-login-ip-v2', 15, 600);
+    $userLimit = security_rate_limit('admin-login-user-v2', 20, 900, strtolower($username));
     if (!$ipLimit['allowed'] || !$userLimit['allowed']) {
-        security_rate_limit_response('Too many administrator login attempts. Please wait 10–15 minutes and try again.', 900, false, 'admin');
+        security_rate_limit_response('Too many administrator login attempts. Please wait a few minutes before trying again.', 900, false, 'admin');
     }
 
     $auth = admin_authenticate($username, $password);
